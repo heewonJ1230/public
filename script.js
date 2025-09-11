@@ -940,16 +940,7 @@ let documentSnowSystem = {
   },
 
   showMessage(text) {
-    const msg = document.createElement('div');
-    msg.textContent = text;
-    msg.style.cssText = `
-      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
-      background:rgba(45,0,54,.9); color:#FFE3F3; padding:15px 25px; border-radius:10px;
-      font-size:16px; z-index:10002; font-family:'DungGeunMo',monospace;
-      box-shadow:0 4px 15px rgba(0,0,0,.3); border:2px solid #FD028F; transition:opacity .3s ease;
-    `;
-    document.body.appendChild(msg);
-    setTimeout(() => { msg.style.opacity = '0'; setTimeout(() => msg.remove(), 300); }, 2500);
+    window.showMessage && window.showMessage(text);
   },
 
   layoutLayers() {

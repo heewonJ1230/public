@@ -1866,20 +1866,14 @@ function initScratchCopy() {
     // 버튼은 initScratchAccountCards 안에서 이미 별도 핸들러가 있어 중복 방지 차원에서 제외
     // const btn = card.querySelector('.scratch-copy');
 
-        const toast = (msg='계좌번호 복사됨!') => {
-      if (documentSnowSystem && typeof documentSnowSystem.showMessage === 'function') {
-        documentSnowSystem.showMessage(msg);
-      } else {
-        const t = document.createElement('div');
-        t.textContent = msg;
-        t.style.cssText =
-          'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);'+
-          "background:rgba(45,0,54,.9); color:#FFE3F3; padding:15px 25px; border-radius:10px;"+
-          "font-size:16px; z-index:10002; font-family:'DungGeunMo',monospace;"+
-          'box-shadow:0 4px 15px rgba(0,0,0,.3); border:2px solid #FD028F; transition:opacity .3s ease;';
-        document.body.appendChild(t);
-        setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2500);
-      }
+    const toast = (msg='계좌번호 복사됨!') => {
+      const t = document.createElement('div');
+      t.textContent = msg;
+      t.style.cssText =
+        'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);'+
+        'padding:8px 12px;border-radius:8px;background:#2d0036;color:#fff4fa;z-index:99999;';
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 1200);
     };
 
     const copyHandler = async (e) => {

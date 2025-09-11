@@ -2378,3 +2378,43 @@ if (ov && ov.parentElement !== document.body) document.body.appendChild(ov);
   initScratchCopy();
 
 });
+
+// Allow copying account number by clicking the number area even under the cover
+document.addEventListener('click', async (e) => {
+  const card = e.target.closest?.('.scratch-card');
+  if (!card) return;
+  // Skip if already revealed; original handler will cover this case
+  if (card.classList.contains('revealed')) return;
+  // Ignore dedicated copy button (handled elsewhere)
+  if (e.target.closest('.scratch-copy')) return;
+
+  const stripEl = e.target.closest('.scratch-strip');
+  const numEl = card.querySelector('.scratch-number');
+  const numClicked = e.target.closest?.('.scratch-number');
+
+  // Only act when the click is on the number element or inside its rect within the strip
+  let insideNumber = false;
+  if (numClicked) {
+    insideNumber = true;
+  } else if (stripEl && numEl) {
+    const x = e.clientX, y = e.clientY;
+    if (x != null && y != null) {
+      const r = numEl.getBoundingClientRect();
+      insideNumber = x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    }
+  }
+  if (!insideNumber) return;
+
+  const account = (card.dataset.number || '').trim();
+  if (!account) return;
+
+  e.preventDefault();
+  const ok = await writeToClipboard(account);
+
+  // Lightweight toast
+  const t = document.createElement('div');
+  t.textContent = ok ? '계좌번호 복사됨' : '복사 실패';
+  t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:8px 12px;border-radius:8px;background:#2d0036;color:#fff4fa;z-index:99999;';
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 1200);
+});

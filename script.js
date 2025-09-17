@@ -2349,7 +2349,23 @@ class PinchZoom {
  * 📤 Guest Upload (모바일 전용) 끗☝🏻☝🏻☝🏻☝🏻
  * ☝🏻☝🏻☝🏻☝🏻========================= */
 
-document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive:false });
+let startX = 0;
+let startY = 0;
+
+document.addEventListener('touchstart', (e) => {
+  startX = e.touches[0].clientX;
+  startY = e.touches[0].clientY;
+}, { passive: true });
+
+document.addEventListener('touchmove', (e) => {
+  const diffX = e.touches[0].clientX - startX;
+  const diffY = e.touches[0].clientY - startY;
+
+  // 가로 이동이 세로보다 클 때만 기본 동작 막기
+  if (Math.abs(diffX) > Math.abs(diffY)) {
+    e.preventDefault();
+  }
+}, { passive: false });
 
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -2399,7 +2415,7 @@ document.addEventListener('click', async (e) => {
   const account = (card.dataset.number || '').trim();
   if (!account) return;
 
-  e.preventDefault();
+  //e.preventDefault();
   const ok = await writeToClipboard(account);
 
   // Lightweight toast

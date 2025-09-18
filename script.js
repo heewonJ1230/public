@@ -210,6 +210,21 @@ function initFirebase() {
         }
 
         firebase.initializeApp(firebaseConfig);
+
+        // App Check 활성화 (compat)
+        try {
+          if (firebase && firebase.appCheck) {
+            // site key는 클라이언트용(공개) — 누나가 발급한 값 사용
+            firebase.appCheck().activate('6LcbVM0rAAAAAPsYRVKzz9uAyj_-kMiW72q461lx', true);
+            console.log('App Check (compat) activated');
+          } else {
+            console.warn('firebase.appCheck not available - check that firebase-app-check-compat.js is loaded');
+          }
+        } catch (e) {
+          console.warn('App Check activation failed:', e);
+        }
+
+        
         firebaseDatabase = firebase.database();
         console.log('Firebase initialized successfully');
         
@@ -220,6 +235,9 @@ function initFirebase() {
         loadLocalMessages();
     }
 }
+
+
+ 
 
 function disableScroll() {
     document.body.style.overflow = 'hidden';

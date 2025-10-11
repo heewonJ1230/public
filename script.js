@@ -1642,6 +1642,7 @@ function initScratchAccountCards() {
     const canvas = card.querySelector('.scratch-canvas');
     const hint   = card.querySelector('.scratch-hint');
     const copyBtn= card.querySelector('.scratch-copy');
+    card.dataset.scratchActive = '0';
 
     // 덮개 그리기
     function paintCover() {
@@ -1742,6 +1743,7 @@ function initScratchAccountCards() {
 
     function start(e){
       e.preventDefault();
+      card.dataset.scratchActive = '1';
       const [x, y] = pointerPos(e);
       drawing = true;
       lastX = x; lastY = y;
@@ -1762,16 +1764,28 @@ function initScratchAccountCards() {
       const [x, y] = pointerPos(e);
       eraseAt(x, y);
     }
-    function end(){ drawing = false; checkReveal(); card.classList.remove('scratching'); }
+    function end(){
+      drawing = false;
+      card.dataset.scratchActive = '0';
+      checkReveal();
+      card.classList.remove('scratching');
+    }
+    function cancel(){
+      drawing = false;
+      card.dataset.scratchActive = '0';
+      card.classList.remove('scratching');
+    }
 
 
     canvas.addEventListener('pointerdown', start);
     canvas.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', cancel);
     // 터치 호환(일부 브라우저)
     canvas.addEventListener('touchstart', start, {passive:false});
     canvas.addEventListener('touchmove',  move, {passive:false});
     window.addEventListener('touchend',   end);
+    window.addEventListener('touchcancel', cancel);
 
     // 리사이즈 시 덮개 리페인트
     const ro = new ResizeObserver(() => {
@@ -1781,10 +1795,11 @@ function initScratchAccountCards() {
 
     // 복사 버튼
     copyBtn?.addEventListener('click', async (e) => {
+      e.preventDefault();
       const text = copyBtn.getAttribute('data-copy') || '';
-      try { await navigator.clipboard.writeText(text); } catch {}
+      const ok = await writeToClipboard(text);
 
-      showCopiedToastAt(e, 'Copied!'); // ← 커서/터치 좌표로 토스트
+      showCopiedToastAt(e, ok ? 'Copied!' : '복사 실패 ㅠㅠ'); // ← 커서/터치 좌표로 토스트
     });
 
 
@@ -1870,10 +1885,6 @@ function initScratchCopy() {
     const account = (card.dataset.number || '').trim();
     if (!account) return;
 
-    const strip = card.querySelector('.scratch-strip');
-    const numEl = card.querySelector('.scratch-number');
-    // 버튼은 initScratchAccountCards 안에서 이미 별도 핸들러가 있어 중복 방지 차원에서 제외
-    // const btn = card.querySelector('.scratch-copy');
 
     const toast = (msg='계좌번호 복사됨!') => {
       const t = document.createElement('div');
@@ -1885,20 +1896,22 @@ function initScratchCopy() {
       setTimeout(() => t.remove(), 1200);
     };
 
+
     const copyHandler = async (e) => {
       // 아직 가려져 있으면(스크래치 덮개 남아있으면) 무시
       if (!card.classList.contains('revealed')) return;
+      if (card.dataset.scratchActive === '1') return;
       // 버튼 자체 클릭은 버튼 전용 핸들러에 맡기기(중복 토스트 방지)
       if (e.target.closest('.scratch-copy')) return;
+      if (e.target.closest('.scratch-canvas')) return;
 
       e.preventDefault();
       const ok = await writeToClipboard(account);
       toast(ok ? '계좌번호 복사됨!' : '복사 실패 😢');
     };
 
-    strip && strip.addEventListener('click', copyHandler);
-    numEl && numEl.addEventListener('click', copyHandler);
-    // btn은 기존 핸들러 사용(커서 위치 토스트 유지)
+    card.addEventListener('click', copyHandler);
+    // 카드 어디를 눌러도 복사되도록 전체 카드에 핸들러 연결
   });
 }
 

@@ -2175,7 +2175,6 @@ body {
 
     /* 계좌 스크래치 줄바꿈/버튼 보호 */
     
-    .scratch-copy  { flex: 0 0 auto; }
 
     /* 같은 줄 정렬 + 줄바꿈 방지 */
     .scratch-strip{
@@ -2184,12 +2183,32 @@ body {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;            /* ✅ 줄바꿈 허용 */
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: rgba(45,0,54,.85);
-    box-shadow: inset 0 0 0 2px #FD028F;
-    overflow: hidden;
-    }
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(45,0,54,.85);
+      box-shadow: inset 0 0 0 2px #FD028F;
+      overflow: hidden;
+      }
+      .scratch-copy-hint{
+      margin-left: auto;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.1);
+      color: #ffe9fa;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      opacity: .7;
+      transition: opacity .2s ease;
+      }
+      .scratch-copy-hint::before{
+      content: '🔗';
+      font-size: 12px;
+      }
+      .scratch-card.revealed .scratch-copy-hint{
+      opacity: 1;
+      }
 
     /* 은행명은 붙여두고, 숫자는 줄바꿈 허용 */
     .scratch-bank  { white-space: nowrap; }
@@ -2227,7 +2246,6 @@ body {
     display: none;
     }
         /* 작게, 번호 옆에 붙는 복사 버튼 */
-     .scratch-copy{
         margin-left: 4px;           /* 6px → 4px */
         width: 16px; height: 16px;  /* 20→16 */
         font-size: 10px;            /* 11→10 */
@@ -2256,19 +2274,14 @@ body {
     animation: scratchToast 1s ease-out forwards; /* 기존 키프레임 재사용 */
     }
         /* 긁어서 공개되면 나타나기 */
-    .scratch-card.revealed .scratch-copy{ opacity:1; pointer-events:auto; }
     /* 더 작게 하고 싶을 때(선택) */
-    .scratch-copy--mini {
     width: 16px; height: 16px;  /* 20→16 */
     font-size: 10px;            /* 11→10 */
     }
-    .scratch-copy { margin-left: 4px; } /* 6px → 4px 더 촘촘히 */
     /* 긁어서 공개되면 버튼도 나타나게 */
-    .scratch-card.revealed .scratch-copy {
     opacity: 1; pointer-events: auto;
     }
    
-    .scratch-copy:hover { transform: translateY(-1px) scale(1.05); }
 
     /* 복사 토스트: 'copied' 1초 표시 */
     .scratch-copied {
@@ -2289,8 +2302,6 @@ body {
     animation: scratchToast 1s ease-out forwards;
     }
     /* 긁어서 공개되면 + 긁는 중에도 복사 버튼 보이기 */
-    .scratch-card.revealed .scratch-copy,
-    .scratch-card.scratching .scratch-copy {
     opacity: 1;
     pointer-events: auto;
     }
@@ -2308,7 +2319,6 @@ body {
         transform: translate(14px, -42px); /* 더 위 */
         font-size: 12px;
     }
-    .scratch-copy.scratch-copy--mini{
         width: 18px; height: 18px; font-size: 11px;
     }
     }
@@ -2504,4 +2514,3 @@ body {
 .mm-overlay img { position: relative; z-index: 1; }  /* 이미지 한 층 올림 */
 .mm-prev, .mm-next, .mm-close { z-index: 2; }        /* 버튼이 이미지보다 위 */
 .mm-prev, .mm-next, .mm-close { touch-action: manipulation; } /* 모바일 클릭 반응 개선 */
-

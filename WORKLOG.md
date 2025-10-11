@@ -4,6 +4,32 @@
 
 ---
 
+### 2025-10-11 - Storage 규칙 개편 (모바일 업로드 App Check 적용)
+
+- **변경 요약:**
+  - `hagack/**` 경로에 대해 **누구나 업로드 가능(익명 허용)**으로 완화.
+  - 단, 업로드는 **App Check Enforce 적용을 전제**로 하고, **이미지 타입 + 5MB 미만**만 허용하도록 단순화.
+  - 기존 `request.headers` 기반 App Check 검증 제거 (Storage Rules에서 헤더 접근 불가 문제 해결).
+  - 기타 모든 경로는 `read: true`, `write: false` 유지.
+
+- **수정 파일:**
+  - `firebase.storage.rules`  
+    - `hagack/**` 매치 추가 및 `isImage()`, `isSmall()` 함수 정의.  
+    - `allow write` 조건 단순화(`isImage() && isSmall()`).
+
+- **테스트/검증:**
+  - 케이스 1: `image/png`, 3MB 파일 업로드 → ✅ 정상 업로드.
+  - 케이스 2: 비이미지(`application/pdf`) 업로드 → ❌ 거절됨.
+  - 케이스 3: 5MB 초과 이미지 → ❌ 거절됨.
+  - 케이스 4: App Check 미적용 클라이언트(토큰 없음) → ❌ Storage 접근 거부됨 (App Check Enforce에 의해).
+  - 케이스 5: `users/**` 또는 기타 경로에 쓰기 시도 → ❌ 거절됨.
+
+- **보안/운영 메모:**
+  - App Check Enforce가 **Storage 접근의 1차 방어선** 역할 수행.
+  - Storage Rules는 파일 타입·용량만 검사하므로 **레이트리밋(DDoS 방어)은 별도 레이어에서 처리 필요**.
+  - 콘솔 App Check → API(Storage) 탭에서 “등록된 앱만 허용됨” 상태 유지 필수.
+  - 차후 Cloud Function 경유 업로드로 업로드 빈도 제어/로그 수집 예정.
+
 
 ## 2025-09-11 - 전역 중앙 토스트 도입 및 복사 알림 통합
 

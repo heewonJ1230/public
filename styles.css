@@ -1,56 +1,61 @@
+html, body {
+    overflow-x: hidden;
+    touch-action: pan-y;
+    overscroll-behavior-x: none;
+}
 
-html, body { overflow-x: hidden; touch-action: pan-y; overscroll-behavior-x: none; }
-/* 스크롤 관련 설정 */
+/* Scroll behavior */
 html {
-    scroll-behavior: smooth;  /* 부드러운 스크롤 */
+    scroll-behavior: smooth;
 }
-/* 모바일 탄성 스크롤 (iOS 전용) */
+
+/* iOS momentum scrolling */
 body {
-    -webkit-overflow-scrolling: touch;  /* iOS 탄성 스크롤 */
+    -webkit-overflow-scrolling: touch;
 }
 
-        /* 픽셀 폰트 */
-        @font-face {
-            font-family: 'DungGeunMo';
-            src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff') format('woff');
-            font-weight: normal;
-            font-style: normal;
-        }
-        
-        @font-face {
-            font-family: 'DNFBitBitv2';
-            font-style: normal;
-            font-weight: 400;
-            src: url('//cdn.df.nexon.com/img/common/font/DNFBitBitv2.otf') format('opentype');
-        }
+/* Global fonts */
+@font-face {
+    font-family: 'DungGeunMo';
+    src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+@font-face {
+    font-family: 'DNFBitBitv2';
+    font-style: normal;
+    font-weight: 400;
+    src: url('//cdn.df.nexon.com/img/common/font/DNFBitBitv2.otf') format('opentype');
+}
 
-        body {
-            font-family: 'DungGeunMo';
-            background: 
-                linear-gradient(135deg, #ffffff46 0%, #230f4b3b 50%, #ff008c1e 80%, #ffabd96c 100%); /* 어두운 오버레이 */
-               /* linear-gradient(135deg, #23272A 0%, #2C2F36 50%, #32363C 100%); */
-            overflow-x: hidden;
-            line-height: 1.6;
-            position: relative;
+:root {
+    --castle-bg-image: none;
+    --castle-bg-fixed-image: none;
+    --mobile-bg-fixed-image: none;
+    --gate-left-image: none;
+    --gate-right-image: none;
+}
 
-            color: #FFF4FA;
-            min-height: 100vh;
+body {
+    font-family: 'DungGeunMo';
+    background:
+        linear-gradient(135deg, #ffffff46 0%, #230f4b3b 50%, #ff008c1e 80%, #ffabd96c 100%);
+    /* linear-gradient(135deg, #23272A 0%, #2C2F36 50%, #32363C 100%); */
+    overflow-x: hidden;
+    line-height: 1.6;
+    position: relative;
+    color: #FFF4FA;
+    min-height: 100vh;
+}
 
-        }
-
-        body::before{
+body::before{
         content:"";
         position: fixed;
         inset: 0;
         background: 
             linear-gradient(135deg, #ffffff46 0%, #230f4b3b 50%, #ff008c1e 80%, #11023b3d 100%), /* 어두운 오버레이 */
-            url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fbg_castle.png?alt=media') center/cover no-repeat;
+            var(--castle-bg-image, none);
         filter: blur(2px);           /* 블러 강도 조절 */
         transform: scale(1.06);       /* 블러 가장자리 잘림 방지 */
         will-change: filter, transform;
@@ -75,7 +80,7 @@ body {
             body {
                 background: 
                     linear-gradient(135deg, #ffffff46 0%, #230f4b3b 50%, #ff008c1e 80%, #ffabd96c 100%), /* 어두운 오버레이 */
-                    url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fm_bg%403x.png?alt=media') no-repeat,
+                    var(--mobile-bg-fixed-image, none),
                     linear-gradient(135deg, #23272A 0%, #2C2F36 50%, #32363C 100%);
                 background-attachment: scroll; /* fixed 대신 scroll 사용 */
                 background-position: center top;
@@ -247,7 +252,7 @@ body {
             transition: opacity 1s ease-out;
             background: 
                 rgba(0, 0, 0, 0.8),
-                url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fbg_castle.png?alt=media') fixed center/cover no-repeat,
+                var(--castle-bg-fixed-image, none),
                 linear-gradient(135deg, rgba(0, 0, 0, 0.8) 0%, rgba(10, 10, 15, 0.8) 50%, rgba(15, 15, 20, 0.8) 100%);
             background-size: cover;
             background-position: center;
@@ -280,14 +285,14 @@ body {
 
         .gate-left {
             right: 50%;
-            background-image: url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fgate_leftt%403x.png?alt=media');
+            background-image: var(--gate-left-image, none);
             background-position: right center;
             z-index: 10;
         }
 
         .gate-right {
             left: 50%;
-            background-image: url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fgate_rightt%403x.png?alt=media');
+            background-image: var(--gate-right-image, none);
             background-position: left center;
             z-index: 10;
         }
@@ -303,7 +308,7 @@ body {
         .gate-container.opened {
             background: 
                 rgba(45, 0, 54, 0.8),
-                url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fbg_castle.png?alt=media') fixed center/cover no-repeat,
+                var(--castle-bg-fixed-image, none),
                 linear-gradient(135deg, rgba(35, 39, 42, 0.8) 0%, rgba(44, 47, 54, 0.8) 50%, rgba(50, 54, 60, 0.8) 100%);
             backdrop-filter: blur(5px);
             transition: all 2s ease-out;
@@ -314,7 +319,7 @@ body {
             .gate-container {
                 background: 
                     rgba(0, 0, 0, 0.8),
-                    url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fm_bg%403x.png?alt=media') fixed center/cover no-repeat,
+                    var(--mobile-bg-fixed-image, none),
                     linear-gradient(135deg, rgba(0, 0, 0, 0.8) 0%, rgba(10, 10, 15, 0.8) 50%, rgba(15, 15, 20, 0.8) 100%);
                 background-attachment: fixed;
                 background-position: center;
@@ -326,7 +331,7 @@ body {
             .gate-container.opened {
                 background: 
                     rgba(45, 0, 54, 0.3),
-                    url('https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fm_bg%403x.png?alt=media') fixed center/cover no-repeat,
+                    var(--mobile-bg-fixed-image, none),
                     linear-gradient(135deg, rgba(35, 39, 42, 0.8) 0%, rgba(44, 47, 54, 0.8) 50%, rgba(50, 54, 60, 0.8) 100%);
                 backdrop-filter: blur(3px);
                 transition: all 2s ease-out;
@@ -1916,9 +1921,7 @@ body {
             content: "";
             position: fixed;
             inset: 0;
-            background:
-                url("https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/images%2Fbg_castle.png?alt=media")
-                center / cover no-repeat;
+            background: var(--castle-bg-image, none);
             filter: blur(20px) saturate(110%); /* '20%' 느낌 -> CSS는 px 단위 */
             transform: scale(1.06);            /* 블러 가장자리 클리핑 방지 */
             will-change: transform, filter;
@@ -2244,7 +2247,7 @@ body {
     .scratch-card.revealed .scratch-canvas,
     .scratch-card.revealed .scratch-hint {
     display: none;
-    }
+    
         /* 작게, 번호 옆에 붙는 복사 버튼 */
         margin-left: 4px;           /* 6px → 4px */
         width: 16px; height: 16px;  /* 20→16 */
@@ -2272,12 +2275,12 @@ body {
     border: 1px solid #FD028F; border-radius: 6px;
     pointer-events: none; z-index: 10000;
     animation: scratchToast 1s ease-out forwards; /* 기존 키프레임 재사용 */
-    }
+    
         /* 긁어서 공개되면 나타나기 */
     /* 더 작게 하고 싶을 때(선택) */
     width: 16px; height: 16px;  /* 20→16 */
     font-size: 10px;            /* 11→10 */
-    }
+    
     /* 긁어서 공개되면 버튼도 나타나게 */
     opacity: 1; pointer-events: auto;
     }
@@ -2300,7 +2303,7 @@ body {
     opacity: 0;
     transform: translateY(6px);
     animation: scratchToast 1s ease-out forwards;
-    }
+    
     /* 긁어서 공개되면 + 긁는 중에도 복사 버튼 보이기 */
     opacity: 1;
     pointer-events: auto;
@@ -2318,7 +2321,7 @@ body {
     .scratch-copied--cursor{
         transform: translate(14px, -42px); /* 더 위 */
         font-size: 12px;
-    }
+    
         width: 18px; height: 18px; font-size: 11px;
     }
     }
@@ -2514,3 +2517,7 @@ body {
 .mm-overlay img { position: relative; z-index: 1; }  /* 이미지 한 층 올림 */
 .mm-prev, .mm-next, .mm-close { z-index: 2; }        /* 버튼이 이미지보다 위 */
 .mm-prev, .mm-next, .mm-close { touch-action: manipulation; } /* 모바일 클릭 반응 개선 */
+
+
+
+

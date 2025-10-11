@@ -1,4 +1,4 @@
-function toggleMobileMenu() {
+﻿function toggleMobileMenu() {
     const toggle = document.querySelector('.mobile-menu-toggle');
     const menu = document.getElementById('mobileMenu');
     toggle.classList.toggle('active');
@@ -15,13 +15,96 @@ function closeMobileMenu() {
 // Firebase 설정
 let firebaseDatabase;
 
+let firebaseStorageInstance = null;
+let resolveStorageReady;
+const storageReady = new Promise(resolve => { resolveStorageReady = resolve; });
+const storageDownloadUrlCache = new Map();
+
 // BGM 관리
-const bgmUrls = [
-    'https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/BGM%2F80%EB%85%84%EB%8C%80%20%EB%AF%B8%EC%97%B0%EC%8B%9C%20%EA%B2%8C%EC%9E%84%20%20(1).mp3?alt=media',
-    'https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/BGM%2F80%EB%85%84%EB%8C%80%20%EB%AF%B8%EC%97%B0%EC%8B%9C%20%EA%B2%8C%EC%9E%84%20%20(Remix).mp3?alt=media',
-    'https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/BGM%2F80%EB%85%84%EB%8C%80%20%EB%AF%B8%EC%97%B0%EC%8B%9C%20%EA%B2%8C%EC%9E%84%20.mp3?alt=media',
-    'https://firebasestorage.googleapis.com/v0/b/hwsghouse.firebasestorage.app/o/BGM%2FUntitled.mp3?alt=media'
+const bgmPaths = [
+    'BGM/80년대 미연시 게임  (1).mp3',
+    'BGM/80년대 미연시 게임  (Remix).mp3',
+    'BGM/80년대 미연시 게임 .mp3',
+    'BGM/Untitled.mp3'
 ];
+
+function waitForStorage() {
+    if (firebaseStorageInstance) return Promise.resolve(firebaseStorageInstance);
+    return storageReady;
+}
+
+async function getStorageDownloadUrl(path) {
+    if (!path) throw new Error('Storage path is required');
+    if (storageDownloadUrlCache.has(path)) return storageDownloadUrlCache.get(path);
+    const storage = await waitForStorage();
+    const url = await storage.ref(path).getDownloadURL();
+    storageDownloadUrlCache.set(path, url);
+    return url;
+}
+
+async function hydrateStorageElements() {
+    const elements = Array.from(document.querySelectorAll('[data-storage-path]'));
+    await Promise.all(elements.map(async el => {
+        const path = el.getAttribute('data-storage-path');
+        if (!path) return;
+        try {
+            const url = await getStorageDownloadUrl(path);
+            const targetAttr = el.getAttribute('data-storage-attr');
+            if (targetAttr) {
+                el.setAttribute(targetAttr, url);
+            } else if (el.tagName === 'LINK') {
+                el.href = url;
+            } else if (el.tagName === 'IMG' || el.tagName === 'SOURCE') {
+                el.src = url;
+            } else {
+                el.setAttribute('data-storage-url', url);
+            }
+            el.dataset.storageLoaded = '1';
+        } catch (err) {
+            console.error('Storage asset load failed:', path, err);
+        }
+    }));
+}
+
+async function hydrateStorageBackgrounds() {
+    const rootStyle = document.documentElement.style;
+    try {
+        const castleUrl = await getStorageDownloadUrl('images/bg_castle.png');
+        rootStyle.setProperty('--castle-bg-image', `url('${castleUrl}') center/cover no-repeat`);
+        rootStyle.setProperty('--castle-bg-fixed-image', `url('${castleUrl}') fixed center/cover no-repeat`);
+    } catch (err) {
+        console.error('Failed to load castle background:', err);
+    }
+
+    try {
+        const mobileUrl = await getStorageDownloadUrl('images/m_bg@3x.png');
+        rootStyle.setProperty('--mobile-bg-fixed-image', `url('${mobileUrl}') fixed center/cover no-repeat`);
+    } catch (err) {
+        console.error('Failed to load mobile background:', err);
+    }
+
+    try {
+        const gateLeft = await getStorageDownloadUrl('images/gate_leftt@3x.png');
+        rootStyle.setProperty('--gate-left-image', `url('${gateLeft}')`);
+    } catch (err) {
+        console.error('Failed to load gate left image:', err);
+    }
+
+    try {
+        const gateRight = await getStorageDownloadUrl('images/gate_rightt@3x.png');
+        rootStyle.setProperty('--gate-right-image', `url('${gateRight}')`);
+    } catch (err) {
+        console.error('Failed to load gate right image:', err);
+    }
+}
+
+async function hydrateStorageAssets() {
+    await Promise.allSettled([
+        hydrateStorageElements(),
+        hydrateStorageBackgrounds()
+    ]);
+}
+
 
 let isPlaying = true;
 let currentBgmIndex = 0;
@@ -50,7 +133,7 @@ function updateBgmButtonsState() {
 }
 
 function initBGM() {
-    shuffledPlaylist = shuffleArray([0, 1, 2, 3]);
+    shuffledPlaylist = shuffleArray(bgmPaths.map((_, idx) => idx));
     currentBgmIndex = 0;
     
     const bgmPlayer = document.getElementById('bgmPlayer');
@@ -59,17 +142,19 @@ function initBGM() {
     const bgmPrev = document.getElementById('bgmPrev');
     
     bgmPlayer.volume = 0.3;
-    loadCurrentTrack();
+    loadCurrentTrack().catch(e => console.log('BGM 초기 로드 실패:', e));
     
-    bgmToggle.addEventListener('click', function() {
+    bgmToggle.addEventListener('click', async function() {
         if (isPlaying) {
             bgmPlayer.pause();
             isPlaying = false;
         } else {
-            bgmPlayer.play().catch(e => {
-                console.log('Play prevented:', e);
-            });
             isPlaying = true;
+            try {
+                await loadCurrentTrack();
+            } catch (e) {
+                console.log('Play prevented:', e);
+            }
         }
         updateBgmButtonsState();
     });
@@ -85,15 +170,17 @@ function initBGM() {
     const navBgmPrev = document.getElementById('navBgmPrev');
 
     if (navBgmToggle) {
-        navBgmToggle.addEventListener('click', function() {
+        navBgmToggle.addEventListener('click', async function() {
             if (isPlaying) {
                 bgmPlayer.pause();
                 isPlaying = false;
             } else {
-                bgmPlayer.play().catch(e => {
-                    console.log('Play prevented:', e);
-                });
                 isPlaying = true;
+                try {
+                    await loadCurrentTrack();
+                } catch (e) {
+                    console.log('Play prevented:', e);
+                }
             }
             updateBgmButtonsState();
         });
@@ -103,15 +190,20 @@ function initBGM() {
     if (navBgmPrev) navBgmPrev.addEventListener('click', prevTrack);
 }
 
-function loadCurrentTrack() {
+async function loadCurrentTrack() {
     const bgmPlayer = document.getElementById('bgmPlayer');
+    if (!bgmPlayer) return;
     const trackIndex = shuffledPlaylist[currentBgmIndex];
-    bgmPlayer.src = bgmUrls[trackIndex];
-    
+    const path = bgmPaths[trackIndex];
+    const url = await getStorageDownloadUrl(path);
+    if (bgmPlayer.dataset.currentTrack !== path) {
+        bgmPlayer.src = url;
+        bgmPlayer.dataset.currentTrack = path;
+    }
     if (isPlaying) {
-        bgmPlayer.play().catch(e => {
-            console.log('Auto-play prevented:', e);
-        });
+        await bgmPlayer.play();
+    } else {
+        bgmPlayer.pause();
     }
 }
 
@@ -119,36 +211,38 @@ function nextTrack() {
     currentBgmIndex = (currentBgmIndex + 1) % shuffledPlaylist.length;
     
     if (currentBgmIndex === 0) {
-        shuffledPlaylist = shuffleArray([0, 1, 2, 3]);
+        shuffledPlaylist = shuffleArray(bgmPaths.map((_, idx) => idx));
     }
     
-    loadCurrentTrack();
+    loadCurrentTrack().catch(e => console.log('BGM next 실패:', e));
     updateBgmButtonsState();
 }
 
 function prevTrack() {
     currentBgmIndex = currentBgmIndex === 0 ? shuffledPlaylist.length - 1 : currentBgmIndex - 1;
-    loadCurrentTrack();
+    loadCurrentTrack().catch(e => console.log('BGM prev 실패:', e));
     updateBgmButtonsState();
 }
 
 function startAutoPlay() {
-    const bgmPlayer = document.getElementById('bgmPlayer');
-    
-    bgmPlayer.play().then(() => {
-        isPlaying = true;
-        updateBgmButtonsState();
-        console.log('BGM auto-play started');
-    }).catch(e => {
-        console.log('Auto-play prevented:', e);
-        document.addEventListener('click', function startOnFirstClick() {
-            bgmPlayer.play().then(() => {
-                isPlaying = true;
-                updateBgmButtonsState();
-            });
-            document.removeEventListener('click', startOnFirstClick);
-        }, { once: true });
-    });
+    isPlaying = true;
+    loadCurrentTrack()
+        .then(() => {
+            updateBgmButtonsState();
+            console.log('BGM auto-play started');
+        })
+        .catch(e => {
+            console.log('Auto-play prevented:', e);
+            const startOnFirstClick = async () => {
+                try {
+                    await loadCurrentTrack();
+                } finally {
+                    updateBgmButtonsState();
+                }
+                document.removeEventListener('click', startOnFirstClick);
+            };
+            document.addEventListener('click', startOnFirstClick, { once: true });
+        });
 }
 
 function initQuestButtons() {
@@ -215,7 +309,7 @@ function initFirebase() {
         try {
           if (firebase && firebase.appCheck) {
             // site key는 클라이언트용(공개) — 누나가 발급한 값 사용
-            firebase.appCheck().activate('6LcbVM0rAAAAAPsYRVKzz9uAyj_-kMiW72q461lx', true);
+            firebase.appCheck().activate('6LeiKeYrAAAAAPoV9JgSetu0XeulWX6zHm_MwVmD', true);
             console.log('App Check (compat) activated');
           } else {
             console.warn('firebase.appCheck not available - check that firebase-app-check-compat.js is loaded');
@@ -225,6 +319,10 @@ function initFirebase() {
         }
 
         
+        firebaseStorageInstance = firebase.storage();
+        resolveStorageReady?.(firebaseStorageInstance);
+        hydrateStorageAssets().catch(err => console.error('Storage asset hydration failed:', err));
+
         firebaseDatabase = firebase.database();
         console.log('Firebase initialized successfully');
         
@@ -981,9 +1079,6 @@ let documentSnowSystem = {
 // SPA 구조를 위한 갤러리 시스템 (IIFE 패턴)
 ;(function(){
     'use strict';
-    
-    const STORAGE_BUCKET = 'hwsghouse.firebasestorage.app';
-    
     // 전역 변수들
     let allImageUrls = [];
     let topImageUrls = [];
@@ -996,1197 +1091,7 @@ let documentSnowSystem = {
     // DOM 요소들
     let overlay, overlayGrid, overlayLoading;
     let openBtn, closeBtn;
-
-    // Firebase Storage 헬퍼 함수들
-    function getStorage() {
-        try {
-            return firebase.storage();
-        } catch (e) {
-            console.log('Firebase Storage 접근 불가:', e);
-            return null;
-        }
-    }
-
-    function getUrlKey(url) {
-        try {
-            const match = /\/o\/([^?]+)/.exec(url);
-            return match ? decodeURIComponent(match[1]) : url;
-        } catch (e) {
-            return url;
-        }
-    }
-
-    async function listFromRef(storageRef) {
-        const res = await storageRef.listAll();
-        const urls = await Promise.all(res.items.map(item => item.getDownloadURL()));
-        const nested = await Promise.all(res.prefixes.map(prefix => listFromRef(prefix)));
-        return urls.concat(...nested);
-    }
-
-    async function listViaRest(prefix) {
-        const bucket = STORAGE_BUCKET;
-        const base = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o`;
-        const urls = [];
-        let pageToken = null;
-        let guard = 0;
-
-        const normalized = prefix.endsWith('/') ? prefix : `${prefix}/`;
-
-        do {
-            try {
-                const qs = new URLSearchParams({ prefix: normalized });
-                if (pageToken) qs.set('pageToken', pageToken);
-
-                console.log(`Firebase REST 요청: ${base}?${qs.toString()}`);
-                
-                const response = await fetch(`${base}?${qs.toString()}`);
-                
-                if (!response.ok) {
-                    console.error(`REST API 실패: ${response.status} ${response.statusText}`);
-                    break;
-                }
-
-                const data = await response.json();
-                const items = data.items || [];
-
-                console.log(`${prefix} 폴더에서 ${items.length}개 파일 발견`);
-
-                for (const item of items) {
-                    urls.push(`${base}/${encodeURIComponent(item.name)}?alt=media`);
-                }
-
-                pageToken = data.nextPageToken || null;
-            } catch (error) {
-                console.error('REST 요청 중 오류:', error);
-                break;
-            }
-        } while (pageToken && ++guard < 100);
-
-        return urls;
-    }
-
-    async function listAllUrls(refPath) {
-        const storage = getStorage();
-        if (!storage) return [];
-
-        const clean = String(refPath || '').replace(/^\/+/, '');
-
-        // 1) Firebase SDK 시도
-        try {
-            const ref = storage.ref(clean);
-            const urls = await listFromRef(ref);
-            if (urls && urls.length) return urls;
-        } catch (e) {
-            console.log('SDK 접근 실패, REST API 시도:', e);
-        }
-
-        // 2) REST API 시도
-        try {
-            const urls = await listViaRest(clean);
-            if (urls && urls.length) return urls;
-        } catch (e) {
-            console.log('REST API 접근 실패:', e);
-        }
-
-        return [];
-    }
-
-    function pickRandomImages(urls, count) {
-        if (!urls || urls.length === 0) return [];
-        
-        const picked = new Set();
-        const needed = Math.min(count, urls.length);
-        
-        while (picked.size < needed) {
-            picked.add(Math.floor(Math.random() * urls.length));
-        }
-        
-        return [...picked].map(idx => urls[idx]);
-    }
-
-    function applySpecialFocus(imgElement, src) {
-        // 7.png의 경우 얼굴 위쪽으로 포커스
-        if (src.includes('Photo%2Ftopimages%2F7.png') || src.includes('/Photo/topimages/7.png')) {
-            imgElement.style.objectPosition = '50% 10%';
-        }
-    }
-
-    // 인덱스 페이지 갤러리 섹션 미리보기 렌더링
-    function renderIndexPreview() {
-        console.log('인덱스 갤러리 미리보기 렌더링 시작');
-        
-        const container = document.getElementById('indexGalleryContainer');
-        if (!container) {
-            console.warn('indexGalleryContainer 요소를 찾을 수 없음 - 나중에 다시 시도');
-            setTimeout(renderIndexPreview, 500);
-            return;
-        }
-
-        // topimages 로드 후 렌더링
-        listAllUrls('Photo/topimages')
-            .then(urls => {
-                topImageUrls = urls;
-                console.log('Top 이미지 로딩 완료:', topImageUrls.length);
-
-                // fallback URLs
-                if (!topImageUrls.length) {
-                    console.log('Firebase에서 로드 실패, fallback URL 사용');
-                    const fallbackUrls = [
-                        '0Start.png', '1.png', '2.png', '3.png', '4.png', 
-                        '5.png', '6.png', '7.png', '8.png', '9.png', '10.png'
-                    ].map(name => 
-                        `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/Photo%2Ftopimages%2F${encodeURIComponent(name)}?alt=media`
-                    );
-                    topImageUrls = fallbackUrls;
-                }
-
-                // 랜덤 4개 선택
-                const randomImages = pickRandomImages(topImageUrls, 4);
-                console.log('랜덤 선택된 이미지:', randomImages.length);
-                
-                // more 카드 보존
-                const moreCard = document.getElementById('indexGalleryMore');
-                const moreCardClone = moreCard ? moreCard.cloneNode(true) : null;
-                
-                // 컨테이너 초기화
-                container.innerHTML = '';
-
-                // 랜덤 이미지 카드 생성
-                randomImages.forEach((src, idx) => {
-                    const card = document.createElement('div');
-                    card.className = 'gallery-item';
-
-                    const img = document.createElement('img');
-                    img.src = src;
-                    img.alt = `갤러리 미리보기 ${idx + 1}`;
-                    img.loading = 'lazy';
-                    img.style.width = '100%';
-                    img.style.height = '100%';
-                    img.style.objectFit = 'cover';
-                    img.style.borderRadius = '8px';
-                    img.style.objectPosition = 'center 30%';
-
-                    // 7.png 특별 처리
-                    applySpecialFocus(img, src);
-
-                    // 클릭 시 오버레이 열기
-                    card.addEventListener('click', openOverlay);
-
-                    card.appendChild(img);
-                    container.appendChild(card);
-                });
-
-                // more 카드 마지막에 다시 추가
-                if (moreCardClone) {
-                    container.appendChild(moreCardClone);
-                }
-
-                console.log('인덱스 미리보기 완료:', randomImages.length, '개 이미지');
-            })
-            .catch(error => {
-                console.error('인덱스 미리보기 렌더링 실패:', error);
-            });
-    }
-
-    // 오버레이 HTML 생성
-    function ensureOverlayHTML() {
-        if (!document.getElementById('galleryOverlay')) {
-            const overlayHTML = `
-            <div id="galleryOverlay" class="gallery-overlay" aria-hidden="true">
-                <div class="overlay-inner" role="dialog" aria-modal="true" aria-label="갤러리 오버레이">
-                    <div class="overlay-header">
-                        <h2 class="section-title">📷 희원 & 상규 갤러리</h2>
-                        <button id="closeGalleryOverlay" class="quick-btn overlay-close-btn" type="button">⬅️🔙 갤러리 나가기</button>
-                    </div>
-                    <div class="overlay-body">
-                        <div id="overlayLoading" class="overlay-loading">
-                            <div class="spinner"></div>
-                            <span>🖼️ 갤러리 로딩 중...</span>
-                        </div>
-                        <div id="overlayGrid" class="overlay-grid" hidden></div>
-                    </div>
-                </div>
-            </div>
-            
-            <style>
-                /* PC 버전 갤러리 오버레이 70% 컨테이너 */
-                @media (min-width: 1024px) {
-                    .gallery-overlay .overlay-inner {
-                        max-width: 70%;
-                        margin: 0 auto;
-                        left: 15%;
-                        right: 15%;
-                    }
-                }
-                
-                .gallery-overlay .overlay-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    margin-bottom: 20px;
-                }
-                
-                .gallery-overlay .section-title {
-                    margin: 0;
-                    text-align: center;
-                    flex: 1;
-                }
-                
-                .overlay-close-btn {
-                    flex-shrink: 0;
-                }
-            </style>`;
-            document.body.insertAdjacentHTML('beforeend', overlayHTML);
-        }
-    }
-
-    // 오버레이 열기
-    async function openOverlay() {
-        console.log('갤러리 오버레이 열기');
-
-        if (!overlay) return;
-
-        overlay.classList.add('show');
-        overlay.setAttribute('aria-hidden', 'false');
-        document.body.style.overflow = 'hidden';
-
-        // 이미지 로딩
-        if (!allImageUrls.length) {
-            await loadAllImages();
-        } else {
-            renderGrid();
-            hideLoading();
-        }
-    }
-
-    // 오버레이 닫기
-    function closeOverlay() {
-        if (!overlay) return;
-
-        overlay.classList.remove('show');
-        overlay.setAttribute('aria-hidden', 'true');
-        document.body.style.overflow = '';
-    }
-
-    // 전체 이미지 로딩
-    async function loadAllImages() {
-        if (isLoading) return;
-        isLoading = true;
-
-        console.log('모든 이미지 로딩 시작');
-
-        try {
-            showLoading();
-
-            // 1) topimages 먼저
-            if (!topImageUrls.length) {
-                topImageUrls = await listAllUrls('Photo/topimages');
-            }
-            console.log('Top 이미지들:', topImageUrls.length);
-
-            // 2) Photo/ 전체 
-            const allPhotoUrls = await listAllUrls('Photo');
-            console.log('전체 Photo 이미지들:', allPhotoUrls.length);
-
-            // 이미지 URL을 이름으로 정렬하는 함수
-            function sortUrlsByName(urls) {
-                return urls.sort((a, b) => {
-                    const nameA = getImageName(a).toLowerCase();
-                    const nameB = getImageName(b).toLowerCase();
-                    return nameA.localeCompare(nameB, 'ko', { numeric: true });
-                });
-            }
-
-            // URL에서 파일명 추출
-            function getImageName(url) {
-                try {
-                    const match = /\/([^\/]+\.(?:png|jpg|jpeg|gif|webp))(\?|$)/i.exec(url);
-                    return match ? decodeURIComponent(match[1]) : url;
-                } catch (e) {
-                    return url;
-                }
-            }
-
-            // topimages 이름순 정렬
-            const sortedTopImages = sortUrlsByName(topImageUrls);
-            
-            // Photo/ 전체에서 topimages 제외하고 이름순 정렬
-            const topKeys = new Set(topImageUrls.map(getUrlKey));
-            const otherImageUrls = allPhotoUrls.filter(url => !topKeys.has(getUrlKey(url)));
-            const sortedOtherImages = sortUrlsByName(otherImageUrls);
-
-            // 최종 배열: topimages(이름순) + 나머지 이미지들(이름순)
-            allImageUrls = [...sortedTopImages, ...sortedOtherImages];
-
-            console.log('최종 이미지 수:', allImageUrls.length);
-            console.log('첫 번째 이미지:', allImageUrls[0]);
-
-            renderGrid();
-            hideLoading();
-
-        } catch (error) {
-            console.error('이미지 로딩 실패:', error);
-            hideLoading();
-            showError();
-        } finally {
-            isLoading = false;
-        }
-    }
-
-    // 슬라이드쇼 오버레이 열기
-    function openSlideshow(startIndex) {
-        currentSlideIndex = startIndex;
-        
-        // 슬라이드쇼 HTML 생성
-        if (!slideshow) {
-            slideshow = document.createElement('div');
-            slideshow.className = 'slideshow-overlay';
-            slideshow.innerHTML = `
-                <div class="slideshow-inner">
-                    <div class="slideshow-header">
-                        <button class="slideshow-close-btn quick-btn">🔙 닫기</button>
-                    </div>
-                    <div class="slideshow-content">
-                        <button class="slideshow-nav slideshow-prev" id="slideshowPrev">❮</button>
-                        <div class="slideshow-image-container">
-                            <img class="slideshow-image" src="" alt="">
-                            <div class="slideshow-counter">
-                                <span id="slideCurrentIndex">1</span> / <span id="slideTotalCount">${allImageUrls.length}</span>
-                            </div>
-                        </div>
-                        <button class="slideshow-nav slideshow-next" id="slideshowNext">❯</button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(slideshow);
-
-            // 슬라이드쇼 이벤트 리스너
-            slideshow.querySelector('.slideshow-close-btn').addEventListener('click', closeSlideshow);
-            slideshow.querySelector('#slideshowPrev').addEventListener('click', () => navigateSlide(-1));
-            slideshow.querySelector('#slideshowNext').addEventListener('click', () => navigateSlide(1));
-            
-            // 배경 클릭으로 닫기
-            slideshow.addEventListener('click', (e) => {
-                if (e.target === slideshow) {
-                    closeSlideshow();
-                }
-            });
-
-            // ESC 키로 닫기
-            document.addEventListener('keydown', handleSlideshowKeydown);
-        }
-
-        updateSlideshow();
-        slideshow.classList.add('show');
-        document.body.style.overflow = 'hidden';
-    }
-
-    // 슬라이드쇼 업데이트
-    function updateSlideshow() {
-        if (!slideshow) return;
-
-        const img = slideshow.querySelector('.slideshow-image');
-        const currentIndexSpan = slideshow.querySelector('#slideCurrentIndex');
-        
-        img.src = allImageUrls[currentSlideIndex];
-        img.alt = `갤러리 이미지 ${currentSlideIndex + 1}`;
-        currentIndexSpan.textContent = currentSlideIndex + 1;
-
-        // 7.png 특별 처리
-        applySpecialFocus(img, allImageUrls[currentSlideIndex]);
-    }
-
-    // 슬라이드 내비게이션
-    function navigateSlide(direction) {
-        currentSlideIndex += direction;
-        
-        if (currentSlideIndex >= allImageUrls.length) {
-            currentSlideIndex = 0;
-        } else if (currentSlideIndex < 0) {
-            currentSlideIndex = allImageUrls.length - 1;
-        }
-        
-        updateSlideshow();
-    }
-
-    // 슬라이드쇼 닫기
-    function closeSlideshow() {
-        if (slideshow) {
-            slideshow.classList.remove('show');
-            document.body.style.overflow = '';
-        }
-    }
-
-    // 슬라이드쇼 키보드 핸들러
-    function handleSlideshowKeydown(e) {
-        if (!slideshow || !slideshow.classList.contains('show')) return;
-        
-        switch(e.key) {
-            case 'Escape':
-                closeSlideshow();
-                break;
-            case 'ArrowLeft':
-                navigateSlide(-1);
-                break;
-            case 'ArrowRight':
-                navigateSlide(1);
-                break;
-        }
-    }
-
-    // 그리드 렌더링
-    function renderGrid() {
-        if (!overlayGrid) return;
-
-        console.log('오버레이 그리드 렌더링 시작:', allImageUrls.length);
-
-        overlayGrid.innerHTML = '';
-
-        if (!allImageUrls.length) {
-            overlayGrid.innerHTML = `
-                <div style="color: #FFE3F3; text-align: center; padding: 40px; grid-column: 1/-1;">
-                    📷 이미지가 없습니다
-                </div>`;
-            return;
-        }
-
-        allImageUrls.forEach((src, idx) => {
-            const card = document.createElement('div');
-            card.className = 'overlay-card';
-
-            const img = document.createElement('img');
-            img.src = src;
-            img.alt = `갤러리 이미지 ${idx + 1}`;
-            img.loading = 'lazy';
-            img.style.width = '100%';
-            img.style.height = '100%';
-            img.style.objectFit = 'cover';
-            img.style.objectPosition = 'center 30%';
-
-            // 7.png 특별 처리
-            applySpecialFocus(img, src);
-
-            // 에러 처리
-            img.onerror = function() {
-                console.warn('이미지 로드 실패:', src);
-                card.style.background = 'rgba(255,0,0,0.2)';
-                card.innerHTML = '<div style="color: #fff; text-align: center; padding: 20px;">로드 실패</div>';
-            };
-
-            // 클릭 시 슬라이드쇼 오버레이 열기
-            card.addEventListener('click', () => openSlideshow(idx));
-
-            card.appendChild(img);
-            overlayGrid.appendChild(card);
-        });
-
-        console.log('그리드 렌더링 완료');
-    }
-
-    // UI 상태 관리 함수들
-    function showLoading() {
-        if (overlayLoading) overlayLoading.style.display = 'flex';
-        if (overlayGrid) overlayGrid.hidden = true;
-    }
-
-    function hideLoading() {
-        if (overlayLoading) overlayLoading.style.display = 'none';
-        if (overlayGrid) overlayGrid.hidden = false;
-    }
-
-    function showError() {
-        if (overlayGrid) {
-            overlayGrid.innerHTML = `
-                <div style="color: #FFE3F3; text-align: center; padding: 40px; grid-column: 1/-1;">
-                    ❌ 이미지를 불러오는데 실패했습니다<br>
-                    잠시 후 다시 시도해주세요
-                </div>`;
-            overlayGrid.hidden = false;
-        }
-    }
-
-    // 이벤트 리스너 설정
-    function setupEventListeners() {
-        // 갤러리 열기 버튼
-        const bindOpenBtn = () => {
-            openBtn = document.getElementById('openGalleryOverlay');
-            if (openBtn) {
-                openBtn.addEventListener('click', openOverlay);
-                console.log('갤러리 열기 버튼 연결됨');
-            } else {
-                setTimeout(bindOpenBtn, 100);
-            }
-        };
-        bindOpenBtn();
-
-        // 갤러리 닫기 버튼 (동적 생성)
-        const bindCloseBtn = () => {
-            closeBtn = document.getElementById('closeGalleryOverlay');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', closeOverlay);
-                console.log('갤러리 닫기 버튼 연결됨');
-            }
-        };
-        setTimeout(bindCloseBtn, 100);
-
-        // ESC 키로 닫기
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && overlay && overlay.classList.contains('show')) {
-                closeOverlay();
-            }
-        });
-    }
-
-    // 초기화
-    function init() {
-        console.log('갤러리 시스템 초기화 시작');
-        
-        ensureOverlayHTML();
-        
-        // DOM 요소 바인딩
-        overlay = document.getElementById('galleryOverlay');
-        overlayGrid = document.getElementById('overlayGrid');
-        overlayLoading = document.getElementById('overlayLoading');
-        
-        setupEventListeners();
-        
-        // 오버레이 배경 클릭으로 닫기
-        if (overlay) {
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) {
-                    closeOverlay();
-                }
-            });
-        }
-        
-        // 인덱스 미리보기 렌더링
-        renderIndexPreview();
-    }
-
-    // 스피너 CSS 추가
-    const spinnerCSS = `
-    <style id="gallery-spinner-styles">
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(255,227,243,0.3);
-            border-left-color: #FD028F;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        .overlay-loading {
-            flex-direction: column;
-            gap: 15px;
-            font-family: 'DungGeunMo';
-            font-size: 1.1rem;
-            color: #FFE3F3;
-            text-shadow: 0 0 10px rgba(255,227,243,0.6);
-        }
-        
-        .overlay-loading span {
-            animation: pulse 1.5s ease-in-out infinite alternate;
-        }
-        
-        @keyframes pulse {
-            from { opacity: 0.7; }
-            to { opacity: 1; }
-        }
-    </style>`;
-
-    // CSS 주입
-    if (!document.getElementById('gallery-spinner-styles')) {
-        document.head.insertAdjacentHTML('beforeend', spinnerCSS);
-    }
-
-    // 디버깅 함수
-    window.debugGallery = function() {
-        console.log('=== 갤러리 디버깅 ===');
-        console.log('전체 이미지:', allImageUrls.length);
-        console.log('Top 이미지:', topImageUrls.length);
-        console.log('Firebase Storage:', !!getStorage());
-        console.log('오버레이 요소:', !!overlay);
-        
-        if (allImageUrls.length) {
-            console.log('첫 번째 이미지:', allImageUrls[0]);
-        }
-    };
-
-    // DOM 로드 완료 후 초기화
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
-})();
-
-      /* ☝🏻☝🏻☝🏻☝🏻☝🏻☝🏻☝🏻=====================
-    * 🖼️🖼️🖼️🖼️Index 끗 갤러리 오버레이🖼️🖼️🖼️🖼️
-    /* ☝🏻☝🏻☝🏻☝🏻☝🏻☝🏻☝🏻=====================
-    * ===================== */
-
-    /* ===== 스크래치 카드 초기화 ===== */
-function initScratchAccountCards() {
-  const cards = document.querySelectorAll('.scratch-card');
-  if (!cards.length) return;
-
-  const DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-
-  cards.forEach(card => {
-    const strip = card.querySelector('.scratch-strip');
-    const canvas = card.querySelector('.scratch-canvas');
-    const hint   = card.querySelector('.scratch-hint');
-    const copyBtn= card.querySelector('.scratch-copy');
-    card.dataset.scratchActive = '0';
-
-    // 덮개 그리기
-    function paintCover() {
-      const { width, height } = strip.getBoundingClientRect();
-      // CSS 크기
-      canvas.style.width  = width + 'px';
-      canvas.style.height = height + 'px';
-      // 실제 캔버스 크기(레티나)
-      canvas.width  = Math.max(1, Math.floor(width * DPR));
-      canvas.height = Math.max(1, Math.floor(height * DPR));
-
-      const ctx = canvas.getContext('2d');
-      ctx.reset && ctx.reset();
-
-      // 배경(그라디언트)
-      const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      g.addColorStop(0, '#7c3aed');   // 보라
-      g.addColorStop(.5, '#fd028f');  // 핑크
-      g.addColorStop(1, '#60a5fa');   // 블루
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // 메탈 느낌 스트라이프
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = '#000';
-      const step = 24 * DPR;
-      for (let x=-canvas.height; x<canvas.width+canvas.height; x+= step) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x+canvas.height, canvas.height);
-        ctx.lineTo(x+canvas.height-8*DPR, canvas.height);
-        ctx.lineTo(x-8*DPR, 0);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-
-     if (hint) {
-        hint.textContent = '긁어서 보기';
-        // 👉 클릭이나 터치가 발생하면 힌트 바로 숨기기
-        canvas.addEventListener('pointerdown', () => { hint.style.display = 'none'; }, { once: true });
-        canvas.addEventListener('touchstart',   () => { hint.style.display = 'none'; }, { once: true });
-        }
-      // 상태 초기화
-      card.classList.remove('revealed');
-      erasedArea.sampled = false;
-    }
-
-    // 지우기(스크래치) 설정
-    const ctx = canvas.getContext('2d');
-    let drawing = false;
-    let lastX = 0, lastY = 0;
-    const BRUSH = 20 * DPR;
-
-    // 지워진 비율 계산(너무 자주 호출하면 느려지니 간헐적으로)
-    const erasedArea = { sampled: false };
-    function checkReveal(force=false) {
-      if (card.classList.contains('revealed')) return;
-      if (!force && erasedArea.sampled) return; // 한 번만
-      erasedArea.sampled = true;
-
-      try {
-        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const total = img.data.length / 4;
-        let transparent = 0;
-        // 알파가 작으면(=이미 긁힌 부분) 카운트
-        for (let i = 3; i < img.data.length; i += 4) {
-          if (img.data[i] < 32) transparent++;
-        }
-        const ratio = transparent / total;
-        if (ratio > 0.25) {
-          card.classList.add('revealed');
-        }
-      } catch(e) {
-        // 보안상 실패하면 버튼으로 대체
-      }
-    }
-
-    function eraseAt(x, y) {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineJoin = ctx.lineCap = 'round';
-      ctx.lineWidth = BRUSH*2;
-      ctx.beginPath();
-      ctx.moveTo(lastX, lastY);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-      ctx.globalCompositeOperation = 'source-over';
-
-      lastX = x; lastY = y;
-    }
-
-    function pointerPos(e) {
-      const r = canvas.getBoundingClientRect();
-      const px = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
-      const py = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
-      return [px * DPR, py * DPR];
-    }
-
-    function start(e){
-      e.preventDefault();
-      card.dataset.scratchActive = '1';
-      const [x, y] = pointerPos(e);
-      drawing = true;
-      lastX = x; lastY = y;
-
-      // 👉 긁는 동안 버튼 보여주기
-      card.classList.add('scratching');
-
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.beginPath();
-      ctx.arc(x, y, BRUSH, 0, Math.PI*2);
-      ctx.fill();
-      ctx.restore();
-      
-    }
-    function move(e){
-      if (!drawing) return;
-      const [x, y] = pointerPos(e);
-      eraseAt(x, y);
-    }
-    function end(){
-      drawing = false;
-      card.dataset.scratchActive = '0';
-      checkReveal();
-      card.classList.remove('scratching');
-    }
-    function cancel(){
-      drawing = false;
-      card.dataset.scratchActive = '0';
-      card.classList.remove('scratching');
-    }
-
-
-    canvas.addEventListener('pointerdown', start);
-    canvas.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', cancel);
-    // 터치 호환(일부 브라우저)
-    canvas.addEventListener('touchstart', start, {passive:false});
-    canvas.addEventListener('touchmove',  move, {passive:false});
-    window.addEventListener('touchend',   end);
-    window.addEventListener('touchcancel', cancel);
-
-    // 리사이즈 시 덮개 리페인트
-    const ro = new ResizeObserver(() => {
-      if (!card.classList.contains('revealed')) paintCover();
-    });
-    ro.observe(strip);
-
-    // 복사 버튼
-    copyBtn?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const text = copyBtn.getAttribute('data-copy') || '';
-      const ok = await writeToClipboard(text);
-
-      showCopiedToastAt(e, ok ? 'Copied!' : '복사 실패 ㅠㅠ'); // ← 커서/터치 좌표로 토스트
-    });
-
-
-    // 커서 옆 토스트
-    function showCursorToast(x, y, message){
-      const el = document.createElement('div');
-      el.className = 'scratch-copied scratch-copied--cursor';
-      el.textContent = message || 'Copied!';
-      el.style.left = `${Math.max(4, x)}px`;
-      el.style.top  = `${Math.max(4, y)}px`;
-      document.body.appendChild(el);
-      setTimeout(() => el.remove(), 1000);
-    }
-  
-
-
-    // 헬퍼 함수 (initScratchAccountCards 안에 추가해도 되고, 밖에 두어도 됩니다)
-    function showCopiedToast(container, message){
-      const el = document.createElement('div');
-      el.className = 'scratch-copied';
-      el.textContent = message || 'copied';
-      container.appendChild(el);
-      setTimeout(() => el.remove(), 1000);
-    }
-    function showCopiedToastAt(e, message = 'Copied!') {
-      const point = (e.touches && e.touches[0]) || e;
-      let x = point?.clientX, y = point?.clientY;
-
-      // 좌표 없으면 버튼 기준으로
-      if (!x || !y) {
-        const r = (e.currentTarget || e.target).getBoundingClientRect();
-        x = r.right; y = r.top;
-      }
-
-      const el = document.createElement('div');
-      el.className = 'scratch-copied scratch-copied--cursor';
-      el.textContent = message;
-      el.style.left = x + 'px';
-      el.style.top  = y + 'px';
-      document.body.appendChild(el);
-      setTimeout(() => el.remove(), 1000);
-    }
-
-
-    // 최초 페인트
-    paintCover();
-  });
-
-    
-  // 전체 공개 버튼
-  document.getElementById('revealAllScratch')?.addEventListener('click', () => {
-    document.querySelectorAll('.scratch-card').forEach(c => c.classList.add('revealed'));
-  });
-}
-
-// 안전한 클립보드 복사(폴백 포함)
-async function writeToClipboard(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {}
-  // 폴백: 임시 textarea 이용
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    ta.style.pointerEvents = 'none';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function initScratchCopy() {
-  document.querySelectorAll('.scratch-card').forEach(card => {
-    const account = (card.dataset.number || '').trim();
-    if (!account) return;
-
-
-    const toast = (msg='계좌번호 복사됨!') => {
-      const t = document.createElement('div');
-      t.textContent = msg;
-      t.style.cssText =
-        'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);'+
-        'padding:8px 12px;border-radius:8px;background:#2d0036;color:#fff4fa;z-index:99999;';
-      document.body.appendChild(t);
-      setTimeout(() => t.remove(), 1200);
-    };
-
-
-    const copyHandler = async (e) => {
-      // 아직 가려져 있으면(스크래치 덮개 남아있으면) 무시
-      if (!card.classList.contains('revealed')) return;
-      if (card.dataset.scratchActive === '1') return;
-      // 버튼 자체 클릭은 버튼 전용 핸들러에 맡기기(중복 토스트 방지)
-      if (e.target.closest('.scratch-copy')) return;
-      if (e.target.closest('.scratch-canvas')) return;
-
-      e.preventDefault();
-      const ok = await writeToClipboard(account);
-      toast(ok ? '계좌번호 복사됨!' : '복사 실패 😢');
-    };
-
-    card.addEventListener('click', copyHandler);
-    // 카드 어디를 눌러도 복사되도록 전체 카드에 핸들러 연결
-  });
-}
-
-// ☝🏻☝🏻✅ 스크래치 카드 - 끗
-
-
-// ===== gs:// -> https 변환 (Firebase Storage) =====
-function gsToHttps(gsUrl){
-  const m = /^gs:\/\/([^\/]+)\/(.+)$/.exec(gsUrl || '');
-  if(!m) return gsUrl;
-  const bucket = m[1];
-  const path = m[2].split('/').map(encodeURIComponent).join('%2F');
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${path}?alt=media`;
-}
-
-// ===== 핀치줌(오버레이 내부 전용) =====
-class PinchZoom {
-  constructor(canvas, img){
-    this.canvas = canvas;
-    this.img = img;
-    this.scale = 1; this.minScale = 1; this.maxScale = 4;
-    this.tx = 0; this.ty = 0;
-    this.prevDistance = 0;
-    this.pointers = new Map();
-    this.lastTap = 0;
-
-    this._down = e => { canvas.setPointerCapture?.(e.pointerId); this.pointers.set(e.pointerId, e); };
-    this._move = e => {
-      if(!this.pointers.has(e.pointerId)) return;
-      this.pointers.set(e.pointerId, e);
-      const pts = Array.from(this.pointers.values());
-      if(pts.length === 2){
-        e.preventDefault();
-        const [p1,p2] = pts;
-        const dist = Math.hypot(p1.clientX-p2.clientX, p1.clientY-p2.clientY);
-        if(this.prevDistance === 0) this.prevDistance = dist;
-        const factor = dist / this.prevDistance; this.prevDistance = dist;
-        this._zoomAt(factor, (p1.clientX+p2.clientX)/2, (p1.clientY+p2.clientY)/2);
-      } else if(pts.length === 1 && this.scale > 1){
-        e.preventDefault();
-        this.tx += (e.movementX||0);
-        this.ty += (e.movementY||0);
-        this._clamp(); this._apply();
-      }
-    };
-    this._up = e => { this.pointers.delete(e.pointerId); if(this.pointers.size<2) this.prevDistance=0; };
-    this._wheel = e => {
-      // 트랙패드 수평/수직 스크롤은 팬, Ctrl/Cmd/Shift + 스크롤은 줌
-      if(!(e.ctrlKey || e.metaKey || e.shiftKey)){
-        if(this.scale>1){ e.preventDefault(); this.tx -= e.deltaX; this.ty -= e.deltaY; this._clamp(); this._apply(); }
-        return;
-      }
-      e.preventDefault();
-      const f = e.deltaY < 0 ? 1.1 : 0.9;
-      this._zoomAt(f, e.clientX, e.clientY);
-    };
-    this._tap = e => {
-      const now = performance.now();
-      if(now - this.lastTap < 300){
-        if(this.scale > 1){ this.scale=1; this.tx=this.ty=0; }
-        else { this.scale=2; this._zoomAt(1, e.clientX, e.clientY); }
-        this._clamp(); this._apply();
-      }
-      this.lastTap = now;
-    };
-
-    canvas.addEventListener('pointerdown', this._down);
-    window.addEventListener('pointermove', this._move, {passive:false});
-    window.addEventListener('pointerup', this._up);
-    canvas.addEventListener('wheel', this._wheel, {passive:false});
-    canvas.addEventListener('click', this._tap);
-  }
-  _zoomAt(factor, cx, cy){
-    const before = this.scale;
-    let next = Math.max(this.minScale, Math.min(this.maxScale, before*factor));
-    factor = next / before; if(factor === 1) return;
-
-    const rect = this.canvas.getBoundingClientRect();
-    const ox = cx - (rect.left + rect.width/2);
-    const oy = cy - (rect.top + rect.height/2);
-    this.tx = (this.tx - ox)*factor + ox;
-    this.ty = (this.ty - oy)*factor + oy;
-    this.scale = next; this._clamp(); this._apply();
-  }
-  _clamp(){
-    const rect = this.canvas.getBoundingClientRect();
-    const iw = this.img.naturalWidth, ih = this.img.naturalHeight;
-    if(!iw || !ih) return;
-    const displayH = rect.height * this.scale;
-    const displayW = displayH * (iw/ih);
-    const maxX = Math.max(0, (displayW - rect.width)/2);
-    const maxY = Math.max(0, (displayH - rect.height)/2);
-    this.tx = Math.max(-maxX, Math.min(maxX, this.tx));
-    this.ty = Math.max(-maxY, Math.min(maxY, this.ty));
-  }
-  _apply(){
-    this.img.style.transform = `translate(calc(-50% + ${this.tx}px), calc(-50% + ${this.ty}px)) scale(${this.scale})`;
-  }
-  zoom(delta){ this._zoomAt(delta>0?1.1:0.9, window.innerWidth/2, window.innerHeight/2); }
-  reset(){ this.scale=1; this.tx=this.ty=0; this._apply(); }
-}
-
-// ===== 오버레이 컨트롤 =====
-(function initFloorOverlay(){
-  const root = document.getElementById('pzOverlay');
-  const backdrop = document.getElementById('pzBackdrop');
-  const closeBtn = document.getElementById('pzClose');
-  const titleEl = document.getElementById('pzTitle');
-  const canvas = document.getElementById('pzCanvas');
-  const img = document.getElementById('pzImage');
-  const zoomIn = document.getElementById('pzZoomIn');
-  const zoomOut = document.getElementById('pzZoomOut');
-  const zoomReset = document.getElementById('pzZoomReset');
-
-  let pz = null;
-
-  function openOverlay(title, gsUrl){
-    titleEl.textContent = title || '';
-    img.src = gsToHttps(gsUrl);
-    img.onload = () => {
-      pz = new PinchZoom(canvas, img);
-      root.classList.add('show');
-      document.body.style.overflow = 'hidden';
-    };
-  }
-  function closeOverlay(){
-    root.classList.remove('show');
-    document.body.style.overflow = '';
-    // 이벤트/상태 정리
-    pz && pz.reset();
-    pz = null;
-  }
-
-  // 버튼 바인딩
-  zoomIn.addEventListener('click', ()=> pz && pz.zoom(+1));
-  zoomOut.addEventListener('click', ()=> pz && pz.zoom(-1));
-  zoomReset.addEventListener('click', ()=> pz && pz.reset());
-  closeBtn.addEventListener('click', closeOverlay);
-  backdrop.addEventListener('click', closeOverlay);
-  window.addEventListener('keydown', e => { if(e.key === 'Escape') closeOverlay(); });
-
-  // 트리거 바인딩 (오시는 길 섹션의 버튼들)
-  document.querySelectorAll('.floor-open').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      openOverlay(btn.getAttribute('data-title'), btn.getAttribute('data-gs'));
-    });
-  });
-})();
-
-
-/* 👇🏻👇🏻👇🏻👇🏻👇🏻👇🏻=========================
- * 📤 Guest Upload (모바일 전용) 시작
- * 📤📤📤📤📤📤========================= */
-(function () {
-  const input = document.getElementById('guestUploadInput');
-  const btn   = document.getElementById('guestUploadBtn');
-  const list  = document.getElementById('guestUploadList');
-  const block = document.getElementById('guestUploadDesktopBlock');
-    // 📌 업로드 루트(GS URL → 폴더명만 뽑아씀)
-  const GUEST_UPLOAD_GS = 'gs://hwsghouse.firebasestorage.app/hagack';
-  const UPLOAD_PREFIX = (function(gs){
-    const m = /^gs:\/\/[^/]+\/(.+)$/.exec(gs||'');
-    return (m ? m[1] : 'hagack').replace(/^\/+|\/+$/g,''); // → "hagack"
-  })(GUEST_UPLOAD_GS);
-
-
-  if (!input || !btn || !list) return;
-
-  // 휴대폰/태블릿 판별 (실사용용으로 충분한 2중 체크)
-  const ua = navigator.userAgent || '';
-  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-  const isMobileUA = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Windows Phone/i.test(ua);
-  const isCoarsePointer = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
-  const isMobile = (isMobileUA || isCoarsePointer) && isTouch;
-
-  // 데스크톱 차단 UI
-  if (!isMobile) {
-    input.disabled = true;
-    btn.disabled = true;
-    block.hidden = false;
-  }
-
-  // 드래그&드롭 업로드도 PC에서 막기
-  window.addEventListener('dragover', e => { if (!isMobile) { e.preventDefault(); } }, { passive:false });
-  window.addEventListener('drop',     e => { if (!isMobile) { e.preventDefault(); } }, { passive:false });
-
-  // 설정값
-  const MAX_FILES      = 10;                 // 한 번에 최대 10장
-  const CEILING_MB     = 100;                // 100MB 이하 보장 (요청 사항)
-  const MAX_DIMENSION  = 4096;               // 너무 큰 원본은 축소
-  const PREFERRED_MIME = supportsWebP() ? 'image/webp' : 'image/jpeg';
-
-  function supportsWebP() {
-    try {
-      const c = document.createElement('canvas');
-      return !!(c.getContext && c.toDataURL('image/webp').indexOf('data:image/webp') === 0);
-    } catch { return false; }
-  }
-
-  // 유틸
-  const fmt = (bytes) => {
-    const kb = 1024, mb = kb*1024;
-    if (bytes >= mb) return (bytes/mb).toFixed(2) + ' MB';
-    if (bytes >= kb) return (bytes/kb).toFixed(1) + ' KB';
-    return bytes + ' B';
-  };
-  const ceilBytes = CEILING_MB * 1024 * 1024;
-
-  // 이미지 로드 → 비트맵(가능하면 EXIF 방향 반영)
-  async function loadToBitmap(file) {
-    if ('createImageBitmap' in window) {
-      try {
-        return await createImageBitmap(file, { imageOrientation: 'from-image' });
-      } catch {}
-    }
-    // Fallback: <img>
-    const img = document.createElement('img');
-    img.decoding = 'async';
-    img.loading = 'eager';
-    img.src = URL.createObjectURL(file);
-    await img.decode().catch(()=>{});
-    // canvas 그리기를 위해 비트맵 유사 객체 반환
-    return img;
-  }
-
-  // 브라우저 내 압축 (차례대로 품질/해상도를 낮추며 ceiling 이하가 될때까지)
-  async function compressImage(file) {
-    // HEIC/HEIF 등 브라우저가 못 여는 건 제외
-    if (!/^image\/(jpe?g|png|webp|gif|bmp|tiff?)$/i.test(file.type)) {
-      throw new Error('이미지 파일만 업로드할 수 있어요.');
-    }
-    let bmp = await loadToBitmap(file);
-    let w = bmp.width, h = bmp.height;
-
-    // 너무 큰 이미지는 축소
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(w, h));
-    if (scale < 1) { w = Math.round(w*scale); h = Math.round(h*scale); }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d', { alpha: true });
-    ctx.drawImage(bmp, 0, 0, w, h);
-
-    // 1차 인코딩
-    let quality = 0.92;
-    let blob = await new Promise(res => canvas.toBlob(res, PREFERRED_MIME, quality));
-
-    // 사이즈가 ceiling 넘으면 점진적으로 줄이기
-    let guard = 0;
-    while (blob && blob.size > ceilBytes && guard++ < 10) {
-      if (quality > 0.5) {
-        quality -= 0.1; // 품질 먼저 낮춤
-      } else {
-        // 품질을 충분히 낮췄는데도 크면 해상도 축소
-        w = Math.round(w * 0.85);
-        h = Math.round(h * 0.85);
-        canvas.width = w; canvas.height = h;
-        ctx.drawImage(bmp, 0, 0, w, h);
-      }
-      blob = await new Promise(res => canvas.toBlob(res, PREFERRED_MIME, quality));
-    }
-
-    if (!blob) throw new Error('이미지 압축 실패');
-    return blob;
-  }
-
-  // Firebase Storage 참조 얻기 (이미 index.html에서 compat SDK 로드됨)
-  function getStorageRef(path) {
-    if (typeof firebase === 'undefined' || !firebase.storage) {
-      throw new Error('Firebase Storage를 사용할 수 없습니다.');
-    }
-    return firebase.storage().ref(path);
-  }
-
-  function addItemRow(name, sizeText) {
+    function addItemRow(name, sizeText) {
     const wrap = document.createElement('div');
     wrap.className = 'upload-item';
     wrap.innerHTML = `
@@ -2206,6 +1111,11 @@ class PinchZoom {
 
   async function doUpload(files) {
     if (!files || !files.length) return;
+    const storage = await waitForStorage().catch(() => null);
+    if (!storage) {
+      alert('스토리지 준비에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
     const arr = Array.from(files).slice(0, MAX_FILES);
 
     list.setAttribute('aria-busy', 'true');
@@ -2239,7 +1149,7 @@ class PinchZoom {
           }
         };
 
-        const ref = getStorageRef(path);
+        const ref = storage.ref(path);
         const task = ref.put(compressed, meta);
 
         await new Promise((resolve, reject) => {
@@ -2251,11 +1161,11 @@ class PinchZoom {
 
         row.bar.style.width = '100%';
         row.status.className = 'upload-done';
-        row.status.textContent = `업로드 완료 (${fmt(compressed.size)}, ${took}s)`;
+        row.status.textContent = 'Upload complete (' + fmt(compressed.size) + ', ' + took + 's)';
       } catch (err) {
         console.error(err);
         row.status.className = 'upload-error';
-        row.status.textContent = `업로드 실패: ${err.message || err}`;
+        row.status.textContent = 'Upload failed: ' + (err && err.message ? err.message : err);
       }
     }
 
@@ -2288,12 +1198,14 @@ class PinchZoom {
   // 외부에서 초기화 타이밍 맞춰 부르기 위함
   window.loadMemorizedMemories = async function(){
     try {
-      if (typeof firebase === 'undefined' || !firebase.storage) return;
+      if (typeof firebase === 'undefined') return;
+      await waitForStorage().catch(() => null);
+      const storage = firebaseStorageInstance || firebase.storage?.();
+      if (!storage) return;
       const rail = document.getElementById('mmRail');
       if (!rail) return;
-
       files = [];
-      const root = firebase.storage().ref(UPLOAD_PREFIX);
+      const root = storage.ref(UPLOAD_PREFIX);
 
       async function walk(ref){
         const res = await ref.listAll();
@@ -2456,3 +1368,11 @@ document.addEventListener('click', async (e) => {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 1200);
 });
+
+
+
+
+
+
+
+

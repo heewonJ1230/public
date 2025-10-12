@@ -19,6 +19,7 @@ let firebaseStorageInstance = null;
 let resolveStorageReady;
 const storageReady = new Promise(resolve => { resolveStorageReady = resolve; });
 const storageDownloadUrlCache = new Map();
+const storageBucketCandidates = new Set();
 
 // BGM 관리
 const bgmPaths = [
@@ -38,10 +39,48 @@ async function getStorageDownloadUrl(pathOrUrl) {
     if (storageDownloadUrlCache.has(pathOrUrl)) return storageDownloadUrlCache.get(pathOrUrl);
     const storage = await waitForStorage();
     const isAbsolute = /^gs:\/\//i.test(pathOrUrl) || /^https?:\/\//i.test(pathOrUrl);
-    const ref = isAbsolute ? storage.refFromURL(pathOrUrl) : storage.ref(pathOrUrl);
-    const url = await ref.getDownloadURL();
-    storageDownloadUrlCache.set(pathOrUrl, url);
-    return url;
+
+    const buckets = Array.from(storageBucketCandidates);
+    const candidates = [];
+
+    if (isAbsolute) {
+        candidates.push({ type: 'absolute', value: pathOrUrl });
+        if (/^gs:\/\//i.test(pathOrUrl)) {
+            const raw = pathOrUrl.slice(5); // strip gs://
+            const slashIdx = raw.indexOf('/');
+            const objectPath = slashIdx >= 0 ? raw.slice(slashIdx + 1) : '';
+            buckets.forEach(bucket => {
+                const variant = `gs://${bucket}/${objectPath}`;
+                if (!candidates.some(c => c.value === variant)) {
+                    candidates.push({ type: 'absolute', value: variant });
+                }
+            });
+        }
+    } else {
+        candidates.push({ type: 'relative', value: pathOrUrl });
+        buckets.forEach(bucket => {
+            const variant = `gs://${bucket}/${pathOrUrl.replace(/^\//, '')}`;
+            if (!candidates.some(c => c.value === variant)) {
+                candidates.push({ type: 'absolute', value: variant });
+            }
+        });
+    }
+
+    let lastError = null;
+    for (const candidate of candidates) {
+        try {
+            const ref = candidate.type === 'relative'
+                ? storage.ref(candidate.value)
+                : storage.refFromURL(candidate.value);
+            const url = await ref.getDownloadURL();
+            storageDownloadUrlCache.set(pathOrUrl, url);
+            storageDownloadUrlCache.set(candidate.value, url);
+            return url;
+        } catch (err) {
+            lastError = err;
+        }
+    }
+    throw lastError || new Error(`Storage asset load failed for ${pathOrUrl}`);
 }
 
 async function hydrateStorageElements() {
@@ -281,12 +320,18 @@ function initFirebase() {
             appCode: 'cacd4198e65fa4728f6103'
         };
         
+        const bucketList = [
+            `${configParts.domain}.firebasestorage.app`,
+            `${configParts.domain}.appspot.com`
+        ];
+        bucketList.forEach(bucket => storageBucketCandidates.add(bucket));
+
         const firebaseConfig = {
             apiKey: configParts.key1 + configParts.key2,
             authDomain: `${configParts.domain}.firebaseapp.com`,
             databaseURL: `https://${configParts.domain}-default-rtdb.${configParts.region}.firebasedatabase.app`,
             projectId: configParts.domain,
-            storageBucket: `${configParts.domain}.appspot.com`,
+            storageBucket: bucketList[0],
             messagingSenderId: configParts.projectNum,
             appId: `1:${configParts.projectNum}:web:${configParts.appCode}`,
             measurementId: "G-5TJ3Y9W2TR"
@@ -322,6 +367,8 @@ function initFirebase() {
 
         
         firebaseStorageInstance = firebase.storage();
+        const detectedBucket = firebaseStorageInstance?.ref?.()?.bucket;
+        if (detectedBucket) storageBucketCandidates.add(detectedBucket);
         resolveStorageReady?.(firebaseStorageInstance);
         hydrateStorageAssets().catch(err => console.error('Storage asset hydration failed:', err));
 
@@ -1192,7 +1239,7 @@ let documentSnowSystem = {
 
 /* ==== Memorized Memories: hagack/ 목록 → 가로 스크롤 & 오버레이 ==== */
 (function(){
-  const UPLOAD_PREFIX = 'hagack'; // gs://hwsghouse.appspot.com/hagack
+  const UPLOAD_PREFIX = 'hagack'; // gs://hwsghouse.firebasestorage.app/hagack (fallbacks handled in code)
 
   let files = [];     // {url, time}
   let cur = 0;        // overlay current index

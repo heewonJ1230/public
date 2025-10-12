@@ -2,7 +2,17 @@
 
 이 파일은 변경 내역을 간단히 축약해 기록하는 용도입니다. PR/커밋 메시지와 별개로, 배포/운영 관점에서 필요한 핵심 포인트를 빠르게 파악할 수 있도록 유지합니다.
 
----
+
+### 2025-10-12 - Firebase Storage 호스트 복구
+
+- 변경 요약:
+  - `script.js`: `storageBucket` 설정을 `hwsghouse.appspot.com`으로 되돌려 Storage SDK가 올바른 버킷을 바라보도록 수정.
+  - `index.html`: `data-gs` 경로를 기존 버킷(`gs://hwsghouse.appspot.com/...`)으로 정정해 썸네일·층별 안내 이미지를 정상 로드.
+  - `script.js`: `hagack` 업로드 경로 주석에 실제 버킷 정보를 명시해 혼동 방지.
+
+- 테스트/검증:
+  - `firebase serve --only hosting`로 로컬 호스팅 후 크롬 DevTools Network 탭에서 이미지·오디오 요청이 200으로 응답하는지 확인.
+  - DevTools Console 탭에서 `Storage asset load failed` 오류가 더 이상 발생하지 않는지 수동 확인.
 
 ### 2025-10-11 오후 - 스크래치 카드 전체 영역 복사 UX 개선
 

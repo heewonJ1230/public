@@ -1,3 +1,52 @@
+﻿# 작업 워크로그 (Work Log)
+
+배포·운영 변경 사항을 간단히 정리합니다. PR/커밋 기록과 별도로 유지합니다.
+
+---
+
+### 2025-10-13 - Storage 버킷 우선순위 조정 & App Check 모니터링 전환
+- 변경 요약:
+  - `script.js`: Firebase 초기화 시 기본 버킷을 `hwsghouse.appspot.com`으로 먼저 지정하고 `.firebasestorage.app`을 보조 후보로 추가해 `listAll()` 호출이 안정적으로 작동하도록 수정.
+  - `script.js`: 갤러리 로더는 기존대로 `hagack/` 업로드 경로(하객 업로드)만 읽도록 유지.
+- 운영 메모:
+  - App Check를 Storage·Realtime Database에서 **Monitoring** 모드로 전환(토큰 문제 해결 전까지 임시 완화).
+  - 브라우저 서비스 워커/캐시 초기화 후 수동 새로고침으로 동작 확인.
+
+---
+
+### 2025-10-12 - Firebase Storage 경로 복원 및 다중 버킷 대응
+- 변경 요약:
+  - `script.js`: Storage 버킷 후보(`.firebasestorage.app`, `.appspot.com`)를 모두 추적하고 `getStorageDownloadUrl`에서 절대·상대 경로를 순차 fallback.
+  - `script.js`: Firebase 초기화 시 사용 가능한 버킷을 등록하고, 실제 연결된 버킷을 감지해 fallback 세트에 추가.
+  - `script.js`: 게스트 업로드 초기화 로직에 DOM 점검·모바일 판별·이미지 압축 헬퍼를 복구해 `btn` ReferenceError 방지.
+  - `index.html`: 층 안내 버튼 `data-gs` 값을 기본 버킷(`gs://hwsghouse.firebasestorage.app/...`)으로 복원.
+- 테스트/검증:
+  - `firebase serve --only hosting` 환경에서 DevTools Network 탭으로 이미지·BGM 요청이 200인지 확인.
+  - DevTools Console에서 `Storage asset load failed` 오류가 사라졌는지 수동 확인.
+
+---
+
+### 2025-10-11 오후 - 스크래치 카드 전체 영역 복사 UX 개선
+- 변경 요약:
+  - `script.js`: 스크래치 진행 상태(`data-scratch-active`) 추적, 터치 `cancel` 시 카드 전체 복사 및 클립보드 실패 처리 보강.
+  - `index.html`: 복사 버튼 제거 후 카드 정보 안내 텍스트 추가.
+  - `styles.css`: `scratch-copy-hint` 배치를 재정렬해 버튼 제거 이후 레이아웃 유지.
+- 테스트/검증:
+  - 모바일: 긁는 제스처 미발생 시 카드 전체 탭 → 복사 성공.
+  - 데스크톱: 버튼 제거 후에도 카드 정렬·스크래치 애니메이션 정상 동작.
+
+---
+
+### 2025-10-11 - Storage 규칙 개편 (모바일 업로드 App Check 적용)
+- 변경 요약:
+  - `firebase.storage.rules`: `hagack/**` 경로에 모바일 업로드 전용 규칙 도입(익명 허용, 이미지 & 5MB 이하, App Check 필수).
+  - 기타 경로는 `read: true`, `write: false` 유지.
+- 테스트/검증:
+  - 이미지/비이미지, 용량 초과, App Check 미적용 등 케이스별로 허용/차단 동작 확인.
+- 운영 메모:
+  - Storage Rules만으로는 레이트 리밋이 어려워 추후 Cloud Functions 기반 방어 필요.
+
+
 # 작업 히스토리 (Work Log)
 
 이 파일은 변경 내역을 간단히 축약해 기록하는 용도입니다. PR/커밋 메시지와 별개로, 배포/운영 관점에서 필요한 핵심 포인트를 빠르게 파악할 수 있도록 유지합니다.

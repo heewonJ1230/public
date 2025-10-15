@@ -321,8 +321,8 @@ function initFirebase() {
         };
         
         const bucketList = [
-            `${configParts.domain}.firebasestorage.app`,
-            `${configParts.domain}.appspot.com`
+            `${configParts.domain}.appspot.com`,
+            `${configParts.domain}.firebasestorage.app`
         ];
         bucketList.forEach(bucket => storageBucketCandidates.add(bucket));
 
@@ -356,7 +356,7 @@ function initFirebase() {
         try {
           if (firebase && firebase.appCheck) {
             // site key는 클라이언트용(공개) — 누나가 발급한 값 사용
-            firebase.appCheck().activate('6LeiKeYrAAAAAPoV9JgSetu0XeulWX6zHm_MwVmD', true);
+            firebase.appCheck().activate('6LcbVM0rAAAAAPsYRVKzz9uAyj_-kMiW72q461lx', true);
             console.log('App Check (compat) activated');
           } else {
             console.warn('firebase.appCheck not available - check that firebase-app-check-compat.js is loaded');
@@ -1128,6 +1128,83 @@ let documentSnowSystem = {
 // SPA 구조를 위한 갤러리 시스템 (IIFE 패턴)
 ;(function(){
     'use strict';
+    const btn = document.getElementById('guestUploadBtn');
+    const input = document.getElementById('guestUploadInput');
+    const list = document.getElementById('guestUploadList');
+    const desktopBlock = document.getElementById('guestUploadDesktopBlock');
+    const mqMatch = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(max-width: 768px)').matches
+        : false;
+    const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test((navigator.userAgent || ''));
+    const isMobile = mqMatch || uaMobile;
+
+    if (desktopBlock) {
+        if (isMobile) {
+            desktopBlock.setAttribute('hidden', '');
+        } else {
+            desktopBlock.removeAttribute('hidden');
+        }
+    }
+
+    const MAX_FILES = 10;
+    const MAX_DIMENSION = 2560;
+    const PREFERRED_MIME = 'image/webp';
+    const PREFERRED_QUALITY = 0.92;
+
+    const sizeUnits = ['B', 'KB', 'MB', 'GB'];
+    const fmt = (bytes) => {
+        if (!Number.isFinite(bytes)) return '0 B';
+        let value = bytes;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < sizeUnits.length - 1) {
+            value /= 1024;
+            unitIndex++;
+        }
+        const precision = unitIndex === 0 ? 0 : 1;
+        return `${value.toFixed(precision)} ${sizeUnits[unitIndex]}`;
+    };
+
+    async function compressImage(file) {
+        if (!(file instanceof Blob) || !file.type?.startsWith('image/')) return file;
+
+        const objectUrl = URL.createObjectURL(file);
+        try {
+            const img = await new Promise((resolve, reject) => {
+                const image = new Image();
+                image.onload = () => resolve(image);
+                image.onerror = () => reject(new Error('Image decode failed'));
+                image.src = objectUrl;
+            });
+
+            let { width, height } = img;
+            if (!width || !height) return file;
+
+            const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
+            const targetWidth = Math.max(1, Math.round(width * scale));
+            const targetHeight = Math.max(1, Math.round(height * scale));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return file;
+
+            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, PREFERRED_MIME, PREFERRED_QUALITY));
+            if (!blob) return file;
+
+            const ext = PREFERRED_MIME.split('/')[1] || 'webp';
+            const baseName = file.name.replace(/\.[^.]+$/, '');
+            return new File([blob], `${baseName}.${ext}`, { type: blob.type, lastModified: Date.now() });
+        } catch (err) {
+            console.warn('compressImage fallback to original file:', err);
+            return file;
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    }
     // 전역 변수들
     let allImageUrls = [];
     let topImageUrls = [];
@@ -1151,7 +1228,7 @@ let documentSnowSystem = {
       <div class="upload-bar"><span></span></div>
       <div class="upload-status" aria-live="polite"></div>
     `;
-    list.appendChild(wrap);
+    list?.appendChild(wrap);
     return {
       bar: wrap.querySelector('.upload-bar > span'),
       status: wrap.querySelector('.upload-status')
@@ -1167,7 +1244,7 @@ let documentSnowSystem = {
     }
     const arr = Array.from(files).slice(0, MAX_FILES);
 
-    list.setAttribute('aria-busy', 'true');
+    list?.setAttribute('aria-busy', 'true');
 
     for (const f of arr) {
       const row = addItemRow(f.name, fmt(f.size));
@@ -1218,20 +1295,24 @@ let documentSnowSystem = {
       }
     }
 
-    list.setAttribute('aria-busy', 'false');
+    list?.setAttribute('aria-busy', 'false');
   }
 
   // 버튼 클릭 → 파일 선택 트리거 (모바일만)
-  btn.addEventListener('click', () => {
-    if (!isMobile) return;
-    input.click();
+  btn?.addEventListener('click', () => {
+    if (!isMobile) {
+      alert('모바일 기기에서만 사진 업로드를 지원합니다.');
+      return;
+    }
+    input?.click();
   });
 
   // 파일 선택 시 바로 업로드
-  input.addEventListener('change', (e) => {
+  input?.addEventListener('change', (e) => {
     if (!isMobile) return;
-    if (!e.target.files || !e.target.files.length) return;
-    doUpload(e.target.files);
+    const files = e.target?.files;
+    if (!files || !files.length) return;
+    doUpload(files);
     // iOS에서 같은 파일 재선택 허용
     e.target.value = '';
   });
@@ -1239,7 +1320,7 @@ let documentSnowSystem = {
 
 /* ==== Memorized Memories: hagack/ 목록 → 가로 스크롤 & 오버레이 ==== */
 (function(){
-  const UPLOAD_PREFIX = 'hagack'; // gs://hwsghouse.firebasestorage.app/hagack (fallbacks handled in code)
+  const UPLOAD_PREFIX = 'hagack'; // guest uploads stay under hagack/YYYY/MM/...
 
   let files = [];     // {url, time}
   let cur = 0;        // overlay current index
@@ -1373,8 +1454,8 @@ if (ov && ov.parentElement !== document.body) document.body.appendChild(ov);
   seedBackgroundSnow?.();
   documentSnowSystem.init();
     // ✅ 스크래치 카드
-  initScratchAccountCards?.();
-  initScratchCopy();
+  globalThis.initScratchAccountCards?.();
+  globalThis.initScratchCopy?.();
 
 });
 

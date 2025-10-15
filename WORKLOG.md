@@ -4,6 +4,23 @@
 
 ---
 
+### 2025-10-15 - 갤러리 로더 복구 & 스크래치 카드 재도입
+
+--변경 요약:
+
+- 갤러리 스크립트를 복원해 Photo/topimages 미리보기와 Photo/ 전체 이미지를 SDK/REST 양쪽에서 다시 불러오도록 정리.
+- 스크래치 카드 커버·복사 로직을 최신 스니펫으로 재적용해 덮개와 토스트 동작을 정상화.
+-- 수정 파일:
+
+- script.js: 갤러리 로딩 IIFE 재삽입 및 스크래치 카드 초기화/복사 함수 재구성.
+-- 테스트/검증:
+
+- window.debugGallery() 실행 시 Top/전체 이미지 개수와 첫 번째 URL이 정상 출력되는지 확인.
+- 브라우저에서 스크래치 카드를 긁어 덮개 해제 및 계좌 복사가 되는지 수동 테스트.
+-- 보안/운영 메모:
+
+- Firebase App Check는 Storage·Realtime Database에서 모니터링 모드 유지 (토큰 문제 해결 전까지).
+
 ### 2025-10-13 - Storage 버킷 우선순위 조정 & App Check 모니터링 전환
 - 변경 요약:
   - `script.js`: Firebase 초기화 시 기본 버킷을 `hwsghouse.appspot.com`으로 먼저 지정하고 `.firebasestorage.app`을 보조 후보로 추가해 `listAll()` 호출이 안정적으로 작동하도록 수정.

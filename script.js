@@ -321,8 +321,8 @@ function initFirebase() {
         };
         
         const bucketList = [
-            `${configParts.domain}.appspot.com`,
-            `${configParts.domain}.firebasestorage.app`
+            `${configParts.domain}.firebasestorage.app`,
+            `${configParts.domain}.appspot.com`
         ];
         bucketList.forEach(bucket => storageBucketCandidates.add(bucket));
 
@@ -1422,6 +1422,724 @@ let documentSnowSystem = {
  * 📤 Guest Upload (모바일 전용) 끗☝🏻☝🏻☝🏻☝🏻
  * ☝🏻☝🏻☝🏻☝🏻========================= */
 
+/* 👇🏻👇🏻👇🏻👇🏻👇🏻👇🏻=====================
+    * 🖼️🖼️🖼️🖼️Index 시작 갤러리 오버레이🖼️🖼️🖼️🖼️
+    /* 👇🏻👇🏻👇🏻👇🏻👇🏻👇🏻=====================
+    * ===================== */
+// SPA 구조를 위한 갤러리 시스템 (IIFE 패턴)
+;(function(){
+    'use strict';
+
+    const GALLERY_ROOT = 'Photo';
+    const TOP_ROOT = 'Photo/topimages';
+
+    let allImageUrls = [];
+    let topImageUrls = [];
+    let isLoading = false;
+
+    let currentSlideIndex = 0;
+    let slideshow = null;
+
+    let overlay, overlayGrid, overlayLoading;
+    let openBtn, closeBtn;
+
+    function getBucketHosts() {
+        const arr = Array.from(storageBucketCandidates);
+        if (!arr.length) return ['hwsghouse.firebasestorage.app', 'hwsghouse.appspot.com'];
+        if (arr.length === 1) {
+            const only = arr[0];
+            if (only.endsWith('.appspot.com')) {
+                return [only.replace('.appspot.com', '.firebasestorage.app'), only];
+            }
+            return [only, only.replace('.firebasestorage.app', '.appspot.com')];
+        }
+        return arr;
+    }
+
+    function getPrimaryBucket() {
+        return getBucketHosts()[0];
+    }
+
+    async function getStorageInstance() {
+        try {
+            return await waitForStorage();
+        } catch {
+            return null;
+        }
+    }
+
+    function getUrlKey(url) {
+        try {
+            const match = /\/o\/([^?]+)/.exec(url);
+            return match ? decodeURIComponent(match[1]) : url;
+        } catch {
+            return url;
+        }
+    }
+
+    async function listFromRef(storageRef) {
+        const res = await storageRef.listAll();
+        const urls = await Promise.all(res.items.map(item => item.getDownloadURL()));
+        const nested = await Promise.all(res.prefixes.map(prefix => listFromRef(prefix)));
+        return urls.concat(...nested);
+    }
+
+    async function listViaRest(prefix) {
+        const bucket = getPrimaryBucket();
+        const base = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o`;
+        const urls = [];
+        let pageToken = null;
+        let guard = 0;
+        const normalized = prefix.replace(/^\/+/, '').replace(/\/+$/, '') + '/';
+
+        do {
+            const qs = new URLSearchParams({ prefix: normalized });
+            if (pageToken) qs.set('pageToken', pageToken);
+            const response = await fetch(`${base}?${qs.toString()}`);
+            if (!response.ok) break;
+            const data = await response.json();
+            const items = data.items || [];
+            for (const item of items) {
+                urls.push(`${base}/${encodeURIComponent(item.name)}?alt=media`);
+            }
+            pageToken = data.nextPageToken || null;
+        } while (pageToken && ++guard < 100);
+
+        return urls;
+    }
+
+    async function listAllUrls(refPath) {
+        const clean = String(refPath || '').replace(/^\/+/, '');
+        const storage = await getStorageInstance();
+
+        if (storage) {
+            try {
+                const ref = storage.ref(clean);
+                const urls = await listFromRef(ref);
+                if (urls?.length) return urls;
+            } catch (err) {
+                console.log('Storage SDK listAll 실패, REST로 재시도:', err);
+            }
+        }
+
+        try {
+            const urls = await listViaRest(clean);
+            if (urls?.length) return urls;
+        } catch (err) {
+            console.log('REST list 실패:', err);
+        }
+        return [];
+    }
+
+    function pickRandomImages(urls, count) {
+        if (!urls?.length) return [];
+        const picked = new Set();
+        const needed = Math.min(count, urls.length);
+        while (picked.size < needed) picked.add(Math.floor(Math.random() * urls.length));
+        return [...picked].map(idx => urls[idx]);
+    }
+
+    function applySpecialFocus(imgElement, src) {
+        if (src.includes('Photo%2Ftopimages%2F7.png') || src.includes('/Photo/topimages/7.png')) {
+            imgElement.style.objectPosition = '50% 10%';
+        }
+    }
+
+    function renderIndexPreview() {
+        const container = document.getElementById('indexGalleryContainer');
+        if (!container) {
+            setTimeout(renderIndexPreview, 500);
+            return;
+        }
+
+        listAllUrls(TOP_ROOT)
+            .then(urls => {
+                topImageUrls = urls;
+                if (!topImageUrls.length) {
+                    const bucket = getPrimaryBucket();
+                    const fallback = ['0Start.png','1.png','2.png','3.png','4.png','5.png','6.png','7.png','8.png','9.png','10.png']
+                        .map(name => `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/Photo%2Ftopimages%2F${encodeURIComponent(name)}?alt=media`);
+                    topImageUrls = fallback;
+                }
+
+                const randomImages = pickRandomImages(topImageUrls, 4);
+                const moreCard = document.getElementById('indexGalleryMore');
+                const moreClone = moreCard ? moreCard.cloneNode(true) : null;
+
+                container.innerHTML = '';
+                randomImages.forEach((src, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'gallery-item';
+                    const img = document.createElement('img');
+                    img.src = src;
+                    img.alt = `갤러리 미리보기 ${idx + 1}`;
+                    img.loading = 'lazy';
+                    img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:8px;object-position:center 30%;';
+                    applySpecialFocus(img, src);
+                    card.addEventListener('click', openOverlay);
+                    card.appendChild(img);
+                    container.appendChild(card);
+                });
+
+                if (moreClone) container.appendChild(moreClone);
+            })
+            .catch(err => console.error('인덱스 미리보기 렌더링 실패:', err));
+    }
+
+    function ensureOverlayHTML() {
+        if (document.getElementById('galleryOverlay')) return;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="galleryOverlay" class="gallery-overlay" aria-hidden="true">
+                <div class="overlay-inner" role="dialog" aria-modal="true" aria-label="갤러리 오버레이">
+                    <div class="overlay-header">
+                        <h2 class="section-title">📷 희원 & 상규 갤러리</h2>
+                        <button id="closeGalleryOverlay" class="quick-btn overlay-close-btn" type="button">⬅️🔙 갤러리 나가기</button>
+                    </div>
+                    <div class="overlay-body">
+                        <div id="overlayLoading" class="overlay-loading">
+                            <div class="spinner"></div>
+                            <span>🖼️ 갤러리 로딩 중...</span>
+                        </div>
+                        <div id="overlayGrid" class="overlay-grid" hidden></div>
+                    </div>
+                </div>
+            </div>
+            <style>
+                @media (min-width: 1024px) {
+                    .gallery-overlay .overlay-inner {
+                        max-width: 70%;
+                        margin: 0 auto;
+                        left: 15%;
+                        right: 15%;
+                    }
+                }
+                .gallery-overlay .overlay-header {
+                    display:flex;
+                    align-items:center;
+                    justify-content:space-between;
+                    margin-bottom:20px;
+                }
+                .gallery-overlay .section-title {
+                    margin:0;
+                    text-align:center;
+                    flex:1;
+                }
+                .overlay-close-btn {
+                    flex-shrink:0;
+                }
+            </style>
+        `);
+    }
+
+    async function openOverlay() {
+        if (!overlay) return;
+        overlay.classList.add('show');
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+        if (!allImageUrls.length) {
+            await loadAllImages();
+        } else {
+            renderGrid();
+            hideLoading();
+        }
+    }
+
+    function closeOverlay() {
+        if (!overlay) return;
+        overlay.classList.remove('show');
+        overlay.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+    }
+
+    async function loadAllImages() {
+        if (isLoading) return;
+        isLoading = true;
+        try {
+            showLoading();
+            if (!topImageUrls.length) {
+                topImageUrls = await listAllUrls(TOP_ROOT);
+            }
+            const allPhotoUrls = await listAllUrls(GALLERY_ROOT);
+            const topKeys = new Set(topImageUrls.map(getUrlKey));
+            const otherImageUrls = allPhotoUrls.filter(url => !topKeys.has(getUrlKey(url)));
+
+            const extractName = (url) => {
+                try {
+                    const match = /\/([^\/]+\.(?:png|jpg|jpeg|gif|webp))(\?|$)/i.exec(url);
+                    return match ? decodeURIComponent(match[1]) : url;
+                } catch {
+                    return url;
+                }
+            };
+            const sortUrlsByName = (urls) => urls.slice().sort((a, b) => extractName(a).localeCompare(extractName(b), 'ko', { numeric: true }));
+
+            const sortedTopImages = sortUrlsByName(topImageUrls);
+            const sortedOthers = sortUrlsByName(otherImageUrls);
+            allImageUrls = [...sortedTopImages, ...sortedOthers];
+
+            renderGrid();
+            hideLoading();
+        } catch (err) {
+            console.error('이미지 로딩 실패:', err);
+            hideLoading();
+            showError();
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    function openSlideshow(startIndex) {
+        currentSlideIndex = startIndex;
+        if (!slideshow) {
+            slideshow = document.createElement('div');
+            slideshow.className = 'slideshow-overlay';
+            slideshow.innerHTML = `
+                <div class="slideshow-inner">
+                    <div class="slideshow-header">
+                        <button class="slideshow-close-btn quick-btn">🔙 닫기</button>
+                    </div>
+                    <div class="slideshow-content">
+                        <button class="slideshow-nav slideshow-prev" id="slideshowPrev">❮</button>
+                        <div class="slideshow-image-container">
+                            <img class="slideshow-image" src="" alt="">
+                            <div class="slideshow-counter">
+                                <span id="slideCurrentIndex">1</span> / <span id="slideTotalCount">${allImageUrls.length}</span>
+                            </div>
+                        </div>
+                        <button class="slideshow-nav slideshow-next" id="slideshowNext">❯</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(slideshow);
+            slideshow.querySelector('.slideshow-close-btn').addEventListener('click', closeSlideshow);
+            slideshow.querySelector('#slideshowPrev').addEventListener('click', () => navigateSlide(-1));
+            slideshow.querySelector('#slideshowNext').addEventListener('click', () => navigateSlide(1));
+            slideshow.addEventListener('click', (e) => {
+                if (e.target === slideshow) closeSlideshow();
+            });
+            document.addEventListener('keydown', handleSlideshowKeydown);
+        }
+        updateSlideshow();
+        slideshow.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function updateSlideshow() {
+        if (!slideshow) return;
+        const img = slideshow.querySelector('.slideshow-image');
+        const currentIndexSpan = slideshow.querySelector('#slideCurrentIndex');
+        img.src = allImageUrls[currentSlideIndex];
+        img.alt = `갤러리 이미지 ${currentSlideIndex + 1}`;
+        currentIndexSpan.textContent = currentSlideIndex + 1;
+        applySpecialFocus(img, allImageUrls[currentSlideIndex]);
+    }
+
+    function navigateSlide(direction) {
+        currentSlideIndex += direction;
+        if (currentSlideIndex >= allImageUrls.length) currentSlideIndex = 0;
+        else if (currentSlideIndex < 0) currentSlideIndex = allImageUrls.length - 1;
+        updateSlideshow();
+    }
+
+    function closeSlideshow() {
+        if (slideshow) {
+            slideshow.classList.remove('show');
+            document.body.style.overflow = '';
+        }
+    }
+
+    function handleSlideshowKeydown(e) {
+        if (!slideshow || !slideshow.classList.contains('show')) return;
+        switch(e.key) {
+            case 'Escape':
+                closeSlideshow();
+                break;
+            case 'ArrowLeft':
+                navigateSlide(-1);
+                break;
+            case 'ArrowRight':
+                navigateSlide(1);
+                break;
+        }
+    }
+
+    function renderGrid() {
+        if (!overlayGrid) return;
+        overlayGrid.innerHTML = '';
+        if (!allImageUrls.length) {
+            overlayGrid.innerHTML = `
+                <div style="color: #FFE3F3; text-align: center; padding: 40px; grid-column: 1/-1;">
+                    📷 이미지가 없습니다
+                </div>`;
+            return;
+        }
+
+        allImageUrls.forEach((src, idx) => {
+            const card = document.createElement('div');
+            card.className = 'overlay-card';
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = `갤러리 이미지 ${idx + 1}`;
+            img.loading = 'lazy';
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'cover';
+            img.style.objectPosition = 'center 30%';
+            applySpecialFocus(img, src);
+            img.onerror = () => {
+                card.style.background = 'rgba(255,0,0,0.2)';
+                card.innerHTML = '<div style="color:#fff;text-align:center;padding:20px;">로드 실패</div>';
+            };
+            card.addEventListener('click', () => openSlideshow(idx));
+            card.appendChild(img);
+            overlayGrid.appendChild(card);
+        });
+    }
+
+    function showLoading() {
+        if (overlayLoading) overlayLoading.style.display = 'flex';
+        if (overlayGrid) overlayGrid.hidden = true;
+    }
+
+    function hideLoading() {
+        if (overlayLoading) overlayLoading.style.display = 'none';
+        if (overlayGrid) overlayGrid.hidden = false;
+    }
+
+    function showError() {
+        if (overlayGrid) {
+            overlayGrid.innerHTML = `
+                <div style="color: #FFE3F3; text-align: center; padding: 40px; grid-column: 1/-1;">
+                    ❌ 이미지를 불러오는데 실패했습니다<br>
+                    잠시 후 다시 시도해주세요
+                </div>`;
+            overlayGrid.hidden = false;
+        }
+    }
+
+    function setupEventListeners() {
+        const bindOpenBtn = () => {
+            openBtn = document.getElementById('openGalleryOverlay');
+            if (openBtn) {
+                openBtn.addEventListener('click', openOverlay);
+            } else {
+                setTimeout(bindOpenBtn, 100);
+            }
+        };
+        bindOpenBtn();
+
+        const bindCloseBtn = () => {
+            closeBtn = document.getElementById('closeGalleryOverlay');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeOverlay);
+            }
+        };
+        setTimeout(bindCloseBtn, 100);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && overlay && overlay.classList.contains('show')) {
+                closeOverlay();
+            }
+        });
+    }
+
+    function init() {
+        ensureOverlayHTML();
+        overlay = document.getElementById('galleryOverlay');
+        overlayGrid = document.getElementById('overlayGrid');
+        overlayLoading = document.getElementById('overlayLoading');
+        setupEventListeners();
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeOverlay();
+            });
+        }
+        renderIndexPreview();
+    }
+
+    const spinnerCSS = `
+    <style id="gallery-spinner-styles">
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255,227,243,0.3);
+            border-left-color: #FD028F;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .overlay-loading {
+            flex-direction: column;
+            gap: 15px;
+            font-family: 'DungGeunMo';
+            font-size: 1.1rem;
+            color: #FFE3F3;
+            text-shadow: 0 0 10px rgba(255,227,243,0.6);
+        }
+        .overlay-loading span {
+            animation: pulse 1.5s ease-in-out infinite alternate;
+        }
+        @keyframes pulse {
+            from { opacity: 0.7; }
+            to { opacity: 1; }
+        }
+    </style>`;
+
+    if (!document.getElementById('gallery-spinner-styles')) {
+        document.head.insertAdjacentHTML('beforeend', spinnerCSS);
+    }
+
+    window.debugGallery = function() {
+        console.log('=== 갤러리 디버깅 ===');
+        console.log('전체 이미지:', allImageUrls.length);
+        console.log('Top 이미지:', topImageUrls.length);
+        console.log('버킷 후보:', Array.from(storageBucketCandidates));
+        if (allImageUrls.length) {
+            console.log('첫 번째 이미지:', allImageUrls[0]);
+        }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+})();
+
+/* ===== 스크래치 카드 초기화 ===== */
+function initScratchAccountCards() {
+  const cards = document.querySelectorAll('.scratch-card');
+  if (!cards.length) return;
+
+  const DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+
+  cards.forEach(card => {
+    const strip = card.querySelector('.scratch-strip');
+    const canvas = card.querySelector('.scratch-canvas');
+    const hint   = card.querySelector('.scratch-hint');
+    const copyBtn= card.querySelector('.scratch-copy');
+    card.dataset.scratchActive = '0';
+
+    function paintCover() {
+      const { width, height } = strip.getBoundingClientRect();
+      canvas.style.width  = width + 'px';
+      canvas.style.height = height + 'px';
+      canvas.width  = Math.max(1, Math.floor(width * DPR));
+      canvas.height = Math.max(1, Math.floor(height * DPR));
+
+      const ctx = canvas.getContext('2d');
+      ctx.reset && ctx.reset();
+
+      const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      g.addColorStop(0, '#7c3aed');
+      g.addColorStop(.5, '#fd028f');
+      g.addColorStop(1, '#60a5fa');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = '#000';
+      const step = 24 * DPR;
+      for (let x=-canvas.height; x<canvas.width+canvas.height; x+= step) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x+canvas.height, canvas.height);
+        ctx.lineTo(x+canvas.height-8*DPR, canvas.height);
+        ctx.lineTo(x-8*DPR, 0);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      if (hint) {
+        hint.textContent = '긁어서 보기';
+        canvas.addEventListener('pointerdown', () => { hint.style.display = 'none'; }, { once: true });
+        canvas.addEventListener('touchstart',   () => { hint.style.display = 'none'; }, { once: true });
+      }
+
+      card.classList.remove('revealed');
+      erasedArea.sampled = false;
+    }
+
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let lastX = 0, lastY = 0;
+    const BRUSH = 20 * DPR;
+
+    const erasedArea = { sampled: false };
+    function checkReveal(force=false) {
+      if (card.classList.contains('revealed')) return;
+      if (!force && erasedArea.sampled) return;
+      erasedArea.sampled = true;
+
+      try {
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const total = img.data.length / 4;
+        let transparent = 0;
+        for (let i = 3; i < img.data.length; i += 4) {
+          if (img.data[i] < 32) transparent++;
+        }
+        const ratio = transparent / total;
+        if (ratio > 0.25) {
+          card.classList.add('revealed');
+        }
+      } catch(e) {
+        // ignore
+      }
+    }
+
+    function eraseAt(x, y) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineJoin = ctx.lineCap = 'round';
+      ctx.lineWidth = BRUSH*2;
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+      lastX = x; lastY = y;
+    }
+
+    function pointerPos(e) {
+      const r = canvas.getBoundingClientRect();
+      const px = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+      const py = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+      return [px * DPR, py * DPR];
+    }
+
+    function start(e){
+      e.preventDefault();
+      card.dataset.scratchActive = '1';
+      const [x, y] = pointerPos(e);
+      drawing = true;
+      lastX = x; lastY = y;
+      card.classList.add('scratching');
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(x, y, BRUSH, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+    function move(e){
+      if (!drawing) return;
+      const [x, y] = pointerPos(e);
+      eraseAt(x, y);
+    }
+    function end(){
+      drawing = false;
+      card.dataset.scratchActive = '0';
+      checkReveal();
+      card.classList.remove('scratching');
+    }
+    function cancel(){
+      drawing = false;
+      card.dataset.scratchActive = '0';
+      card.classList.remove('scratching');
+    }
+
+    canvas.addEventListener('pointerdown', start);
+    canvas.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', cancel);
+    canvas.addEventListener('touchstart', start, {passive:false});
+    canvas.addEventListener('touchmove', move, {passive:false});
+    window.addEventListener('touchend', end);
+    window.addEventListener('touchcancel', cancel);
+
+    const ro = new ResizeObserver(() => {
+      if (!card.classList.contains('revealed')) paintCover();
+    });
+    ro.observe(strip);
+
+    copyBtn?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const text = copyBtn.getAttribute('data-copy') || '';
+      const ok = await writeToClipboard(text);
+      showCopiedToastAt(e, ok ? 'Copied!' : '복사 실패 ㅠㅠ');
+    });
+
+    function showCopiedToastAt(e, message = 'Copied!') {
+      const point = (e.touches && e.touches[0]) || e;
+      let x = point?.clientX, y = point?.clientY;
+      if (!x || !y) {
+        const r = (e.currentTarget || e.target).getBoundingClientRect();
+        x = r.right; y = r.top;
+      }
+      const el = document.createElement('div');
+      el.className = 'scratch-copied scratch-copied--cursor';
+      el.textContent = message;
+      el.style.left = x + 'px';
+      el.style.top  = y + 'px';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1000);
+    }
+
+    paintCover();
+  });
+
+  document.getElementById('revealAllScratch')?.addEventListener('click', () => {
+    document.querySelectorAll('.scratch-card').forEach(c => c.classList.add('revealed'));
+  });
+}
+
+async function writeToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function initScratchCopy() {
+  document.querySelectorAll('.scratch-card').forEach(card => {
+    const account = (card.dataset.number || '').trim();
+    if (!account) return;
+
+    const toast = (msg='계좌번호 복사됨!') => {
+      const t = document.createElement('div');
+      t.textContent = msg;
+      t.style.cssText =
+        'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);'+
+        'padding:8px 12px;border-radius:8px;background:#2d0036;color:#fff4fa;z-index:99999;';
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 1200);
+    };
+
+    const copyHandler = async (e) => {
+      if (!card.classList.contains('revealed')) return;
+      if (card.dataset.scratchActive === '1') return;
+      if (e.target.closest('.scratch-copy')) return;
+      if (e.target.closest('.scratch-canvas')) return;
+
+      e.preventDefault();
+      const ok = await writeToClipboard(account);
+      toast(ok ? '계좌번호 복사됨!' : '복사 실패 😢');
+    };
+
+    card.addEventListener('click', copyHandler);
+  });
+}
+
 let startX = 0;
 let startY = 0;
 
@@ -1457,46 +2175,6 @@ if (ov && ov.parentElement !== document.body) document.body.appendChild(ov);
   globalThis.initScratchAccountCards?.();
   globalThis.initScratchCopy?.();
 
-});
-
-// Allow copying account number by clicking the number area even under the cover
-document.addEventListener('click', async (e) => {
-  const card = e.target.closest?.('.scratch-card');
-  if (!card) return;
-  // Skip if already revealed; original handler will cover this case
-  if (card.classList.contains('revealed')) return;
-  // Ignore dedicated copy button (handled elsewhere)
-  if (e.target.closest('.scratch-copy')) return;
-
-  const stripEl = e.target.closest('.scratch-strip');
-  const numEl = card.querySelector('.scratch-number');
-  const numClicked = e.target.closest?.('.scratch-number');
-
-  // Only act when the click is on the number element or inside its rect within the strip
-  let insideNumber = false;
-  if (numClicked) {
-    insideNumber = true;
-  } else if (stripEl && numEl) {
-    const x = e.clientX, y = e.clientY;
-    if (x != null && y != null) {
-      const r = numEl.getBoundingClientRect();
-      insideNumber = x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-    }
-  }
-  if (!insideNumber) return;
-
-  const account = (card.dataset.number || '').trim();
-  if (!account) return;
-
-  //e.preventDefault();
-  const ok = await writeToClipboard(account);
-
-  // Lightweight toast
-  const t = document.createElement('div');
-  t.textContent = ok ? '계좌번호 복사됨' : '복사 실패';
-  t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:8px 12px;border-radius:8px;background:#2d0036;color:#fff4fa;z-index:99999;';
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 1200);
 });
 
 

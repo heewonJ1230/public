@@ -14,6 +14,7 @@ function closeMobileMenu() {
 
 // Firebase 설정
 let firebaseDatabase;
+let defaultGuestMessageTemplate = null;
 
 let firebaseStorageInstance = null;
 let resolveStorageReady;
@@ -444,6 +445,66 @@ window.addEventListener('load', function() {
     }, { once: true });
 });
 
+function createDefaultGuestMessageNode() {
+    const messagesList = document.getElementById('messagesList');
+    if (!messagesList) return null;
+    if (!defaultGuestMessageTemplate) {
+        const baseNode = messagesList.querySelector('.message-item');
+        if (!baseNode) return null;
+        defaultGuestMessageTemplate = baseNode.cloneNode(true);
+        defaultGuestMessageTemplate.dataset.defaultMessage = '1';
+    }
+    const clone = defaultGuestMessageTemplate.cloneNode(true);
+    clone.dataset.defaultMessage = '1';
+    return clone;
+}
+
+function renderMessagesFromArray(messages = []) {
+    const messagesList = document.getElementById('messagesList');
+    if (!messagesList) return;
+    const placeholder = createDefaultGuestMessageNode();
+    messagesList.innerHTML = '';
+    messages.forEach((msg) => {
+        const messageItem = document.createElement('div');
+        messageItem.className = 'message-item';
+        messageItem.innerHTML = `
+            <div class="message-author">${msg.name}</div>
+            <div class="message-text">${msg.message}</div>
+        `;
+        messagesList.appendChild(messageItem);
+    });
+    if (placeholder) {
+        messagesList.appendChild(placeholder);
+    }
+}
+
+function renderMessagesFromSnapshot(snapshot) {
+    const collected = [];
+    snapshot.forEach((childSnapshot) => {
+        collected.push(childSnapshot.val());
+    });
+    collected.reverse();
+    renderMessagesFromArray(collected);
+}
+
+async function refreshGuestMessages() {
+    const messagesList = document.getElementById('messagesList');
+    if (!messagesList) return;
+    messagesList.setAttribute('aria-busy', 'true');
+    try {
+        if (firebaseDatabase) {
+            const snapshot = await firebaseDatabase.ref('messages').orderByChild('timestamp').once('value');
+            renderMessagesFromSnapshot(snapshot);
+        } else {
+            loadLocalMessages();
+        }
+    } catch (err) {
+        console.error('Messages refresh failed:', err);
+    } finally {
+        messagesList.removeAttribute('aria-busy');
+    }
+}
+
 function addMessage() {
     const name = document.getElementById('name').value.trim();
     const message = document.getElementById('message').value.trim();
@@ -465,15 +526,18 @@ function addMessage() {
             .then(() => {
                 document.getElementById('name').value = '';
                 document.getElementById('message').value = '';
+                refreshGuestMessages().catch(console.error);
                 alert('축하 메시지가 등록되었습니다! 💕');
             })
             .catch((error) => {
                 console.error('메시지 저장 실패:', error);
                 saveLocalMessage(name, message);
+                refreshGuestMessages().catch(console.error);
                 alert('축하 메시지가 등록되었습니다! 💕');
             });
     } else {
         saveLocalMessage(name, message);
+        refreshGuestMessages().catch(console.error);
         alert('축하 메시지가 등록되었습니다! 💕');
     }
 }
@@ -483,33 +547,9 @@ function loadMessages() {
         loadLocalMessages();
         return;
     }
-    
-    const messagesList = document.getElementById('messagesList');
-    
+    createDefaultGuestMessageNode();
     firebaseDatabase.ref('messages').orderByChild('timestamp').on('value', (snapshot) => {
-        const defaultMessage = messagesList.querySelector('.message-item');
-        messagesList.innerHTML = '';
-        
-        const messages = [];
-        snapshot.forEach((childSnapshot) => {
-            messages.push(childSnapshot.val());
-        });
-        
-        // 최신 메시지부터 추가 (reverse된 순서로)
-        messages.reverse().forEach((msg) => {
-            const messageItem = document.createElement('div');
-            messageItem.className = 'message-item';
-            messageItem.innerHTML = `
-                <div class="message-author">${msg.name}</div>
-                <div class="message-text">${msg.message}</div>
-            `;
-            messagesList.appendChild(messageItem); // 순서대로 추가
-        });
-        
-        // 가족일동 메시지를 마지막에 추가
-        if (defaultMessage) {
-            messagesList.appendChild(defaultMessage);
-        }
+        renderMessagesFromSnapshot(snapshot);
     });
 }
 
@@ -521,31 +561,13 @@ function saveLocalMessage(name, message) {
         date: new Date().toISOString()
     });
     localStorage.setItem('weddingMessages', JSON.stringify(messages));
-    
-    const messagesList = document.getElementById('messagesList');
-    const messageItem = document.createElement('div');
-    messageItem.className = 'message-item';
-    messageItem.innerHTML = `
-        <div class="message-author">${name}</div>
-        <div class="message-text">${message}</div>
-    `;
-    messagesList.insertBefore(messageItem, messagesList.firstChild);
 }
 
 function loadLocalMessages() {
     const messages = JSON.parse(localStorage.getItem('weddingMessages') || '[]');
-    const messagesList = document.getElementById('messagesList');
-    
-    messages.forEach(msg => {
-        const messageItem = document.createElement('div');
-        messageItem.className = 'message-item';
-        messageItem.innerHTML = `
-            <div class="message-author">${msg.name}</div>
-            <div class="message-text">${msg.message}</div>
-        `;
-        messagesList.appendChild(messageItem);
-    });
+    renderMessagesFromArray(messages);
 }
+
 // ==[ 네이버 길찾기/장소 링크 - 한 곳에서 관리 ]====================
 const HWSG_DIRECTIONS_URL =
   "https://map.naver.com/p/directions/-/14154953.1604186,4496467.9631484,%ED%95%A0%EB%A0%90%EB%A3%A8%EC%95%BC%EA%B5%90%ED%9A%8C,1171200793,PLACE_POI/place/transit?c=13.65,0,0,0,dh";
@@ -1164,8 +1186,56 @@ let documentSnowSystem = {
         return `${value.toFixed(precision)} ${sizeUnits[unitIndex]}`;
     };
 
+    const MIME_EXT_OVERRIDES = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/pjpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+        'image/heic': 'heic',
+        'image/heif': 'heif',
+        'image/avif': 'avif',
+        'image/bmp': 'bmp',
+        'image/svg+xml': 'svg'
+    };
+
+    function extractExtFromName(name = '') {
+        const match = /\.(\w+)$/.exec(name);
+        return match ? match[1].toLowerCase() : '';
+    }
+
+    function pickExt(mime = '', fallbackName = '') {
+        const lowerMime = (mime || '').toLowerCase();
+        if (lowerMime && MIME_EXT_OVERRIDES[lowerMime]) return MIME_EXT_OVERRIDES[lowerMime];
+        if (lowerMime) {
+            const idx = lowerMime.indexOf('/');
+            if (idx >= 0 && idx < lowerMime.length - 1) {
+                const tail = lowerMime.slice(idx + 1).split(/[+;]/)[0];
+                if (tail) return tail;
+            }
+        }
+        return extractExtFromName(fallbackName);
+    }
+
+    function renameWithExt(name = 'upload', ext = '') {
+        if (!ext) return name;
+        const base = name.includes('.') ? name.replace(/\.[^/.]+$/, '') : name;
+        return `${base}.${ext}`;
+    }
+
     async function compressImage(file) {
-        if (!(file instanceof Blob) || !file.type?.startsWith('image/')) return file;
+        const fallbackInfo = () => {
+            const fallbackExt = pickExt(file?.type, file?.name) || 'img';
+            return {
+                file,
+                mime: file?.type || '',
+                ext: fallbackExt,
+                transformed: false
+            };
+        };
+
+        if (!(file instanceof Blob) || !file.type?.startsWith('image/')) return fallbackInfo();
 
         const objectUrl = URL.createObjectURL(file);
         try {
@@ -1177,7 +1247,7 @@ let documentSnowSystem = {
             });
 
             let { width, height } = img;
-            if (!width || !height) return file;
+            if (!width || !height) return fallbackInfo();
 
             const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
             const targetWidth = Math.max(1, Math.round(width * scale));
@@ -1188,19 +1258,30 @@ let documentSnowSystem = {
             canvas.height = targetHeight;
 
             const ctx = canvas.getContext('2d');
-            if (!ctx) return file;
+            if (!ctx) return fallbackInfo();
 
             ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-            const blob = await new Promise(resolve => canvas.toBlob(resolve, PREFERRED_MIME, PREFERRED_QUALITY));
-            if (!blob) return file;
+            let blob = await new Promise(resolve => canvas.toBlob(resolve, PREFERRED_MIME, PREFERRED_QUALITY));
+            if (!blob || !blob.type) {
+                blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+            }
+            if (!blob) return fallbackInfo();
 
-            const ext = PREFERRED_MIME.split('/')[1] || 'webp';
-            const baseName = file.name.replace(/\.[^.]+$/, '');
-            return new File([blob], `${baseName}.${ext}`, { type: blob.type, lastModified: Date.now() });
+            const finalMime = blob.type || file.type || PREFERRED_MIME;
+            const finalExt = pickExt(finalMime, file.name) || 'jpg';
+            const renamed = renameWithExt(file.name, finalExt);
+            const processed = new File([blob], renamed, { type: finalMime, lastModified: Date.now() });
+
+            return {
+                file: processed,
+                mime: finalMime,
+                ext: finalExt,
+                transformed: true
+            };
         } catch (err) {
             console.warn('compressImage fallback to original file:', err);
-            return file;
+            return fallbackInfo();
         } finally {
             URL.revokeObjectURL(objectUrl);
         }
@@ -1218,104 +1299,156 @@ let documentSnowSystem = {
     let overlay, overlayGrid, overlayLoading;
     let openBtn, closeBtn;
     function addItemRow(name, sizeText) {
-    const wrap = document.createElement('div');
-    wrap.className = 'upload-item';
-    wrap.innerHTML = `
-      <div class="upload-item__row">
-        <div class="upload-name" title="${name}">${name}</div>
-        <div class="upload-size">${sizeText}</div>
-      </div>
-      <div class="upload-bar"><span></span></div>
-      <div class="upload-status" aria-live="polite"></div>
-    `;
-    list?.appendChild(wrap);
-    return {
-      bar: wrap.querySelector('.upload-bar > span'),
-      status: wrap.querySelector('.upload-status')
-    };
-  }
+const wrap = document.createElement('div');
+wrap.className = 'upload-item';
+wrap.innerHTML = `
+  <div class="upload-item__row">
+    <div class="upload-name" title="${name}">${name}</div>
+    <div class="upload-size">${sizeText}</div>
+  </div>
+  <div class="upload-bar"><span></span></div>
+  <div class="upload-status" aria-live="polite"></div>
+`;
+list?.appendChild(wrap);
+const barEl = wrap.querySelector('.upload-bar > span');
+if (barEl) barEl.style.width = '0%';
+return {
+  bar: barEl,
+  status: wrap.querySelector('.upload-status')
+};
+} 
 
-  async function doUpload(files) {
+const mmRefreshBtn = document.getElementById('mmRefreshBtn');
+if (mmRefreshBtn && !mmRefreshBtn.dataset.label) {
+    mmRefreshBtn.dataset.label = (mmRefreshBtn.textContent || 'Memorized Memories 🔃').trim();
+}
+
+async function refreshMemoriesSection() {
+    const btn = mmRefreshBtn;
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('is-refreshing');
+        btn.textContent = '불러오는 중...';
+    }
+    try {
+        await window.loadMemorizedMemories?.();
+    } catch (err) {
+        console.error('Memorized Memories refresh failed:', err);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('is-refreshing');
+            btn.textContent = btn.dataset.label || 'Memorized Memories 🔃';
+        }
+    }
+}
+
+mmRefreshBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    refreshMemoriesSection();
+});
+
+async function doUpload(files) {
     if (!files || !files.length) return;
     const storage = await waitForStorage().catch(() => null);
     if (!storage) {
-      alert('스토리지 준비에 실패했습니다. 잠시 후 다시 시도해주세요.');
-      return;
+        alert('스토리지가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
+        return;
     }
     const arr = Array.from(files).slice(0, MAX_FILES);
 
     list?.setAttribute('aria-busy', 'true');
 
+    let hasSuccess = false;
+
     for (const f of arr) {
-      const row = addItemRow(f.name, fmt(f.size));
-      try {
-        // 압축
-        const start = Date.now();
-        const compressed = await compressImage(f);
-        const took = ((Date.now()-start)/1000).toFixed(1);
+        const row = addItemRow(f.name, fmt(f.size));
+        try {
+            if (row.status) {
+                row.status.textContent = '업로드 중...💫';
+                row.status.className = 'upload-status upload-progress';
+            }
 
-        // 경로: guest-uploads/YYYY/MM/ts-rand.webp|jpg
-        const now = new Date();
-        const yyyy = String(now.getFullYear());
-        const mm   = String(now.getMonth()+1).padStart(2,'0');
-        const ts   = now.toISOString().replace(/[:.]/g,'-');
-        const rand = Math.random().toString(36).slice(2,8);
+            const start = Date.now();
+            const { file: uploadFile, mime: outputMime, ext: outputExt } = await compressImage(f);
+            if (!uploadFile) throw new Error('업로드 파일 생성 실패');
+            const finalMime = (outputMime && outputMime.startsWith('image/'))
+                ? outputMime
+                : (f.type && f.type.startsWith('image/')) ? f.type : PREFERRED_MIME;
+            const finalExt = outputExt || pickExt(finalMime, uploadFile?.name) || pickExt(f.type, f.name) || 'jpg';
 
-        const ext = (PREFERRED_MIME === 'image/webp') ? 'webp' : 'jpg';
-        const path = `${UPLOAD_PREFIX}/${yyyy}/${mm}/${ts}-${rand}.${ext}`; // → hagack/YYYY/MM/...
+            const now = new Date();
+            const yyyy = String(now.getFullYear());
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const ts = now.toISOString().replace(/[:.]/g, '-');
+            const rand = Math.random().toString(36).slice(2, 8);
 
-        const meta = {
-          contentType: PREFERRED_MIME,
-          customMetadata: {
-            originalName: f.name,
-            originalSize: String(f.size),
-            compressedSize: String(compressed.size),
-            ua: navigator.userAgent,
-            uploadedAt: new Date().toISOString()
-          }
-        };
+            const path = `${UPLOAD_PREFIX}/${yyyy}/${mm}/${ts}-${rand}.${finalExt}`; // → hagack/YYYY/MM/...
 
-        const ref = storage.ref(path);
-        const task = ref.put(compressed, meta);
+            const meta = {
+                contentType: finalMime,
+                customMetadata: {
+                    originalName: f.name,
+                    originalSize: String(f.size),
+                    processedName: uploadFile?.name || '',
+                    compressedSize: String(uploadFile?.size ?? 0),
+                    compressedType: finalMime,
+                    compressedExt: finalExt,
+                    ua: navigator.userAgent,
+                    uploadedAt: new Date().toISOString()
+                }
+            };
 
-        await new Promise((resolve, reject) => {
-          task.on('state_changed', (snap) => {
-            const pct = snap.totalBytes ? (snap.bytesTransferred / snap.totalBytes) * 100 : 0;
-            row.bar.style.width = pct.toFixed(1) + '%';
-          }, reject, resolve);
-        });
+            const ref = storage.ref(path);
+            const task = ref.put(uploadFile, meta);
 
-        row.bar.style.width = '100%';
-        row.status.className = 'upload-done';
-        row.status.textContent = 'Upload complete (' + fmt(compressed.size) + ', ' + took + 's)';
-      } catch (err) {
-        console.error(err);
-        row.status.className = 'upload-error';
-        row.status.textContent = 'Upload failed: ' + (err && err.message ? err.message : err);
-      }
+            await new Promise((resolve, reject) => {
+                task.on('state_changed', (snap) => {
+                    const pct = snap.totalBytes ? (snap.bytesTransferred / snap.totalBytes) * 100 : 0;
+                    if (row.bar) row.bar.style.width = pct.toFixed(1) + '%';
+                }, reject, resolve);
+            });
+
+            if (row.bar) row.bar.style.width = '100%';
+            if (row.status) {
+                row.status.className = 'upload-status upload-done';
+                row.status.textContent = '업로드 성공 ☑️(❁´◡`❁)';
+            }
+            hasSuccess = true;
+        } catch (err) {
+            console.error(err);
+            if (row.status) {
+                row.status.className = 'upload-status upload-error';
+                row.status.textContent = '업로드 실패 😩ㅠ';
+            }
+        }
     }
 
     list?.setAttribute('aria-busy', 'false');
-  }
 
-  // 버튼 클릭 → 파일 선택 트리거 (모바일만)
-  btn?.addEventListener('click', () => {
+    if (hasSuccess) {
+        await refreshMemoriesSection();
+    }
+}
+
+// 버튼 클릭 → 모바일 안내 후 파일 선택
+btn?.addEventListener('click', () => {
     if (!isMobile) {
-      alert('모바일 기기에서만 사진 업로드를 지원합니다.');
-      return;
+        alert('모바일 환경에서만 업로드를 지원합니다.');
+        return;
     }
     input?.click();
-  });
+});
 
-  // 파일 선택 시 바로 업로드
-  input?.addEventListener('change', (e) => {
+// 파일 선택 시 즉시 업로드
+input?.addEventListener('change', (e) => {
     if (!isMobile) return;
     const files = e.target?.files;
     if (!files || !files.length) return;
     doUpload(files);
-    // iOS에서 같은 파일 재선택 허용
+    // iOS에서 동일 파일 재첨부 가능하도록 초기화
     e.target.value = '';
-  });
+});
 })();
 
 /* ==== Memorized Memories: hagack/ 목록 → 가로 스크롤 & 오버레이 ==== */
@@ -1590,7 +1723,7 @@ let documentSnowSystem = {
         if (document.getElementById('galleryOverlay')) return;
         document.body.insertAdjacentHTML('beforeend', `
             <div id="galleryOverlay" class="gallery-overlay" aria-hidden="true">
-                <div class="overlay-inner" role="dialog" aria-modal="true" aria-label="갤러리 오버레이">
+                <div class="overlay-inner" role="dialog" aria-modal="true" aria-label="������ ��������">
                     <div class="overlay-header">
                         <h2 class="section-title">📷 희원 & 상규 갤러리</h2>
                         <button id="closeGalleryOverlay" class="quick-btn overlay-close-btn" type="button">⬅️🔙 갤러리 나가기</button>

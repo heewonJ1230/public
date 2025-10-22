@@ -4,6 +4,18 @@
 
 ---
 
+### 2025-10-22 - 하객 스냅샷 업로드/축하 메시지 개선
+- 하객 스냅샷 업로드 안되던 문제 
+- `script.js`
+  - 게스트 업로드 진행 상태 문구/오류 문구 교체 및 업로드 성공 시 자동으로 Memorized Memories 섹션 새로고침.
+  - `mmRefreshBtn` 클릭 시 갤러리만 재로딩하도록 `refreshMemoriesSection` 추가.
+  - 메시지 전송 후 `refreshGuestMessages` 호출해 축하 메시지 목록만 다시 그리도록 분리(`renderMessagesFromArray` 등 보조 함수 포함).
+  - `compressImage`가 변환된 MIME/확장자를 반환하도록 보강, Storage 메타데이터에 압축 정보 기록.
+- `index.html`
+  - Memorized Memories 영역에 “Memorized Memories 🔃” 새로고침 버튼 추가.
+- `styles.css`
+  - `.mm-refresh-btn` 스타일 정의(호버/로딩 상태 포함)로 새로고침 버튼 시각적 통일.
+
 ### 2025-10-15 - 갤러리 로더 복구 & 스크래치 카드 재도입
 
 --변경 요약:

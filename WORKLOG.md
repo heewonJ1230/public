@@ -11,6 +11,7 @@
   - `mmRefreshBtn` 클릭 시 갤러리만 재로딩하도록 `refreshMemoriesSection` 추가.
   - 메시지 전송 후 `refreshGuestMessages` 호출해 축하 메시지 목록만 다시 그리도록 분리(`renderMessagesFromArray` 등 보조 함수 포함).
   - `compressImage`가 변환된 MIME/확장자를 반환하도록 보강, Storage 메타데이터에 압축 정보 기록.
+  - 게스트 업로드 스코프에 `const UPLOAD_PREFIX = 'hagack'`를 재선언해 ReferenceError 방지.
 - `index.html`
   - Memorized Memories 영역에 “Memorized Memories 🔃” 새로고침 버튼 추가.
 - `styles.css`

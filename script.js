@@ -1154,6 +1154,7 @@ let documentSnowSystem = {
     const input = document.getElementById('guestUploadInput');
     const list = document.getElementById('guestUploadList');
     const desktopBlock = document.getElementById('guestUploadDesktopBlock');
+    const UPLOAD_PREFIX = 'hagack'; // guest uploads stay under hagack/YYYY/MM/...
     const mqMatch = typeof window.matchMedia === 'function'
         ? window.matchMedia('(max-width: 768px)').matches
         : false;

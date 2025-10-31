@@ -1161,6 +1161,25 @@ let documentSnowSystem = {
     const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test((navigator.userAgent || ''));
     const isMobile = mqMatch || uaMobile;
 
+    const ensureAppCheckToken = (() => {
+        let tokenPromise = null;
+        return async () => {
+            if (typeof firebase === 'undefined' || !firebase.appCheck) return;
+            if (!tokenPromise) {
+                tokenPromise = firebase.appCheck().getToken(true).catch(err => {
+                    console.warn('App Check token fetch failed:', err);
+                    tokenPromise = null;
+                    throw err;
+                });
+            }
+            try {
+                await tokenPromise;
+            } catch {
+                tokenPromise = null;
+            }
+        };
+    })();
+
     if (desktopBlock) {
         if (isMobile) {
             desktopBlock.setAttribute('hidden', '');
@@ -1173,6 +1192,7 @@ let documentSnowSystem = {
     const MAX_DIMENSION = 2560;
     const PREFERRED_MIME = 'image/webp';
     const PREFERRED_QUALITY = 0.92;
+    const MAX_BYTES = 5 * 1024 * 1024; // stay within storage rule limit
 
     const sizeUnits = ['B', 'KB', 'MB', 'GB'];
     const fmt = (bytes) => {
@@ -1351,6 +1371,7 @@ mmRefreshBtn?.addEventListener('click', (event) => {
 
 async function doUpload(files) {
     if (!files || !files.length) return;
+    await ensureAppCheckToken().catch(() => {});
     const storage = await waitForStorage().catch(() => null);
     if (!storage) {
         alert('스토리지가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
@@ -1373,6 +1394,14 @@ async function doUpload(files) {
             const start = Date.now();
             const { file: uploadFile, mime: outputMime, ext: outputExt } = await compressImage(f);
             if (!uploadFile) throw new Error('업로드 파일 생성 실패');
+            if (uploadFile.size >= MAX_BYTES) {
+                if (row.status) {
+                    row.status.className = 'upload-status upload-error';
+                    row.status.textContent = '업로드 실패 😩ㅠ (5MB 초과)';
+                }
+                console.warn('Guest upload skipped due to size > 5MB:', uploadFile.size);
+                continue;
+            }
             const finalMime = (outputMime && outputMime.startsWith('image/'))
                 ? outputMime
                 : (f.type && f.type.startsWith('image/')) ? f.type : PREFERRED_MIME;

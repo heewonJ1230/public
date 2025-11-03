@@ -505,9 +505,11 @@ async function refreshGuestMessages() {
     }
 }
 
-function addMessage() {
-    const name = document.getElementById('name').value.trim();
-    const message = document.getElementById('message').value.trim();
+async function addMessage() {
+    const nameInput = document.getElementById('name');
+    const messageInput = document.getElementById('message');
+    const name = nameInput.value.trim();
+    const message = messageInput.value.trim();
     
     if (!name || !message) {
         alert('이름과 메시지를 모두 입력해주세요.');
@@ -521,25 +523,31 @@ function addMessage() {
         date: new Date().toISOString()
     };
     
+    let savedToRemote = false;
+    
     if (firebaseDatabase) {
-        firebaseDatabase.ref('messages').push(messageData)
-            .then(() => {
-                document.getElementById('name').value = '';
-                document.getElementById('message').value = '';
-                refreshGuestMessages().catch(console.error);
-                alert('축하 메시지가 등록되었습니다! 💕');
-            })
-            .catch((error) => {
-                console.error('메시지 저장 실패:', error);
-                saveLocalMessage(name, message);
-                refreshGuestMessages().catch(console.error);
-                alert('축하 메시지가 등록되었습니다! 💕');
-            });
-    } else {
-        saveLocalMessage(name, message);
-        refreshGuestMessages().catch(console.error);
-        alert('축하 메시지가 등록되었습니다! 💕');
+        try {
+            await firebaseDatabase.ref('messages').push(messageData);
+            savedToRemote = true;
+        } catch (error) {
+            console.error('메시지 업로드 실패:', error);
+        }
     }
+    
+    if (!savedToRemote) {
+        saveLocalMessage(name, message);
+    }
+    
+    nameInput.value = '';
+    messageInput.value = '';
+    
+    try {
+        await refreshGuestMessages();
+    } catch (err) {
+        console.error('Messages refresh failed:', err);
+    }
+    
+    alert('축하 메시지가 등록되었습니다! 💕');
 }
 
 function loadMessages() {
@@ -1148,337 +1156,271 @@ let documentSnowSystem = {
     /* 👇🏻👇🏻👇🏻👇🏻👇🏻👇🏻=====================
     * ===================== */
 // SPA 구조를 위한 갤러리 시스템 (IIFE 패턴)
-;(function(){
-    'use strict';
-    const btn = document.getElementById('guestUploadBtn');
-    const input = document.getElementById('guestUploadInput');
-    const list = document.getElementById('guestUploadList');
-    const desktopBlock = document.getElementById('guestUploadDesktopBlock');
-    const UPLOAD_PREFIX = 'hagack'; // guest uploads stay under hagack/YYYY/MM/...
-    const mqMatch = typeof window.matchMedia === 'function'
-        ? window.matchMedia('(max-width: 768px)').matches
-        : false;
-    const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test((navigator.userAgent || ''));
-    const isMobile = mqMatch || uaMobile;
+/* ==== Guest Upload (mobile only) ==== */
+;(function () {
+  const input = document.getElementById("guestUploadInput");
+  const btn = document.getElementById("guestUploadBtn");
+  const list = document.getElementById("guestUploadList");
+  const block = document.getElementById("guestUploadDesktopBlock");
 
-    const ensureAppCheckToken = (() => {
-        let tokenPromise = null;
-        return async () => {
-            if (typeof firebase === 'undefined' || !firebase.appCheck) return;
-            if (!tokenPromise) {
-                tokenPromise = firebase.appCheck().getToken(true).catch(err => {
-                    console.warn('App Check token fetch failed:', err);
-                    tokenPromise = null;
-                    throw err;
-                });
-            }
-            try {
-                await tokenPromise;
-            } catch {
-                tokenPromise = null;
-            }
-        };
-    })();
+  if (!input || !btn || !list) return;
 
-    if (desktopBlock) {
-        if (isMobile) {
-            desktopBlock.setAttribute('hidden', '');
-        } else {
-            desktopBlock.removeAttribute('hidden');
-        }
+  const GUEST_UPLOAD_GS = "gs://hwsghouse.firebasestorage.app/hagack";
+  const UPLOAD_PREFIX = (() => {
+    const matched = /^gs:\/\/[^/]+\/(.+)$/.exec(GUEST_UPLOAD_GS);
+    return (matched ? matched[1] : "hagack").replace(/^\/+|\/+$/g, "");
+  })();
+
+  const ua = navigator.userAgent || '';
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone/i.test(ua);
+  const isIOSDesktopMode = /\bMacintosh\b/.test(ua) && isTouch; // iPadOS Safari desktop UA
+  const isSmallScreenTouch = isTouch && Math.min(window.innerWidth, window.innerHeight) <= 1024;
+  const isMobile = isMobileUA || isIOSDesktopMode || isSmallScreenTouch;
+
+  if (block) {
+    if (isMobile) {
+      block.setAttribute('hidden', '');
+    } else {
+      block.removeAttribute('hidden');
     }
+  }
+  if (!isMobile) {
+    input.disabled = true;
+    btn.disabled = true;
+  }
 
-    const MAX_FILES = 10;
-    const MAX_DIMENSION = 2560;
-    const PREFERRED_MIME = 'image/webp';
-    const PREFERRED_QUALITY = 0.92;
-    const MAX_BYTES = 5 * 1024 * 1024; // stay within storage rule limit
+  window.addEventListener('dragover', (event) => { if (!isMobile) event.preventDefault(); }, { passive: false });
+  window.addEventListener('drop', (event) => { if (!isMobile) event.preventDefault(); }, { passive: false });
 
-    const sizeUnits = ['B', 'KB', 'MB', 'GB'];
-    const fmt = (bytes) => {
-        if (!Number.isFinite(bytes)) return '0 B';
-        let value = bytes;
-        let unitIndex = 0;
-        while (value >= 1024 && unitIndex < sizeUnits.length - 1) {
-            value /= 1024;
-            unitIndex++;
-        }
-        const precision = unitIndex === 0 ? 0 : 1;
-        return `${value.toFixed(precision)} ${sizeUnits[unitIndex]}`;
-    };
+  const MAX_FILES = 10;
+  const MAX_DIMENSION = 4096;
+  const PREFERRED_MIME = supportsWebP() ? 'image/webp' : 'image/jpeg';
+  const CEILING_MB = 5;
+  const RATE_LIMIT_MS = 10 * 1000;
+  const ceilBytes = CEILING_MB * 1024 * 1024;
+  let lastAttemptAt = 0;
 
-    const MIME_EXT_OVERRIDES = {
-        'image/jpeg': 'jpg',
-        'image/jpg': 'jpg',
-        'image/pjpeg': 'jpg',
-        'image/png': 'png',
-        'image/webp': 'webp',
-        'image/gif': 'gif',
-        'image/heic': 'heic',
-        'image/heif': 'heif',
-        'image/avif': 'avif',
-        'image/bmp': 'bmp',
-        'image/svg+xml': 'svg'
-    };
-
-    function extractExtFromName(name = '') {
-        const match = /\.(\w+)$/.exec(name);
-        return match ? match[1].toLowerCase() : '';
-    }
-
-    function pickExt(mime = '', fallbackName = '') {
-        const lowerMime = (mime || '').toLowerCase();
-        if (lowerMime && MIME_EXT_OVERRIDES[lowerMime]) return MIME_EXT_OVERRIDES[lowerMime];
-        if (lowerMime) {
-            const idx = lowerMime.indexOf('/');
-            if (idx >= 0 && idx < lowerMime.length - 1) {
-                const tail = lowerMime.slice(idx + 1).split(/[+;]/)[0];
-                if (tail) return tail;
-            }
-        }
-        return extractExtFromName(fallbackName);
-    }
-
-    function renameWithExt(name = 'upload', ext = '') {
-        if (!ext) return name;
-        const base = name.includes('.') ? name.replace(/\.[^/.]+$/, '') : name;
-        return `${base}.${ext}`;
-    }
-
-    async function compressImage(file) {
-        const fallbackInfo = () => {
-            const fallbackExt = pickExt(file?.type, file?.name) || 'img';
-            return {
-                file,
-                mime: file?.type || '',
-                ext: fallbackExt,
-                transformed: false
-            };
-        };
-
-        if (!(file instanceof Blob) || !file.type?.startsWith('image/')) return fallbackInfo();
-
-        const objectUrl = URL.createObjectURL(file);
-        try {
-            const img = await new Promise((resolve, reject) => {
-                const image = new Image();
-                image.onload = () => resolve(image);
-                image.onerror = () => reject(new Error('Image decode failed'));
-                image.src = objectUrl;
-            });
-
-            let { width, height } = img;
-            if (!width || !height) return fallbackInfo();
-
-            const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
-            const targetWidth = Math.max(1, Math.round(width * scale));
-            const targetHeight = Math.max(1, Math.round(height * scale));
-
-            const canvas = document.createElement('canvas');
-            canvas.width = targetWidth;
-            canvas.height = targetHeight;
-
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return fallbackInfo();
-
-            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-            let blob = await new Promise(resolve => canvas.toBlob(resolve, PREFERRED_MIME, PREFERRED_QUALITY));
-            if (!blob || !blob.type) {
-                blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
-            }
-            if (!blob) return fallbackInfo();
-
-            const finalMime = blob.type || file.type || PREFERRED_MIME;
-            const finalExt = pickExt(finalMime, file.name) || 'jpg';
-            const renamed = renameWithExt(file.name, finalExt);
-            const processed = new File([blob], renamed, { type: finalMime, lastModified: Date.now() });
-
-            return {
-                file: processed,
-                mime: finalMime,
-                ext: finalExt,
-                transformed: true
-            };
-        } catch (err) {
-            console.warn('compressImage fallback to original file:', err);
-            return fallbackInfo();
-        } finally {
-            URL.revokeObjectURL(objectUrl);
-        }
-    }
-    // 전역 변수들
-    let allImageUrls = [];
-    let topImageUrls = [];
-    let isLoading = false;
-    
-    // 슬라이드쇼 관련 변수들
-    let currentSlideIndex = 0;
-    let slideshow = null;
-    
-    // DOM 요소들
-    let overlay, overlayGrid, overlayLoading;
-    let openBtn, closeBtn;
-    function addItemRow(name, sizeText) {
-const wrap = document.createElement('div');
-wrap.className = 'upload-item';
-wrap.innerHTML = `
-  <div class="upload-item__row">
-    <div class="upload-name" title="${name}">${name}</div>
-    <div class="upload-size">${sizeText}</div>
-  </div>
-  <div class="upload-bar"><span></span></div>
-  <div class="upload-status" aria-live="polite"></div>
-`;
-list?.appendChild(wrap);
-const barEl = wrap.querySelector('.upload-bar > span');
-if (barEl) barEl.style.width = '0%';
-return {
-  bar: barEl,
-  status: wrap.querySelector('.upload-status')
-};
-} 
-
-const mmRefreshBtn = document.getElementById('mmRefreshBtn');
-if (mmRefreshBtn && !mmRefreshBtn.dataset.label) {
-    mmRefreshBtn.dataset.label = (mmRefreshBtn.textContent || 'Memorized Memories 🔃').trim();
-}
-
-async function refreshMemoriesSection() {
-    const btn = mmRefreshBtn;
-    if (btn) {
-        btn.disabled = true;
-        btn.classList.add('is-refreshing');
-        btn.textContent = '불러오는 중...';
-    }
+  function supportsWebP() {
     try {
-        await window.loadMemorizedMemories?.();
-    } catch (err) {
-        console.error('Memorized Memories refresh failed:', err);
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.classList.remove('is-refreshing');
-            btn.textContent = btn.dataset.label || 'Memorized Memories 🔃';
-        }
+      const canvas = document.createElement('canvas');
+      return !!(canvas.getContext && canvas.toDataURL('image/webp').indexOf('data:image/webp') === 0);
+    } catch {
+      return false;
     }
-}
+  }
 
-mmRefreshBtn?.addEventListener('click', (event) => {
-    event.preventDefault();
-    refreshMemoriesSection();
-});
+  const fmt = (bytes) => {
+    const kb = 1024;
+    const mb = kb * 1024;
+    if (bytes >= mb) return (bytes / mb).toFixed(2) + ' MB';
+    if (bytes >= kb) return (bytes / kb).toFixed(1) + ' KB';
+    return bytes + ' B';
+  };
 
-async function doUpload(files) {
+  async function loadToBitmap(file) {
+    if ('createImageBitmap' in window) {
+      try {
+        return await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch {
+        // fall back to <img> path
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img');
+      img.decoding = 'async';
+      img.loading = 'eager';
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(img);
+      };
+      img.onerror = (err) => {
+        URL.revokeObjectURL(objectUrl);
+        reject(err);
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  async function compressImage(file) {
+    if (!(file instanceof Blob) || !file.type.startsWith('image/')) {
+      throw new Error('Only image files can be uploaded.');
+    }
+
+    const bitmap = await loadToBitmap(file);
+    let width = bitmap.width || 0;
+    let height = bitmap.height || 0;
+    if (!width || !height) {
+      throw new Error('Image decode failed.');
+    }
+
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
+    if (scale < 1) {
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    let ctx = canvas.getContext('2d', { alpha: true });
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    let quality = 0.92;
+    let blob = await new Promise((resolve) => canvas.toBlob(resolve, PREFERRED_MIME, quality));
+    let guard = 0;
+    while (blob && blob.size > ceilBytes && guard++ < 8) {
+      if (quality > 0.5) {
+        quality = Math.max(0.5, quality - 0.1);
+      } else {
+        width = Math.max(64, Math.round(width * 0.85));
+        height = Math.max(64, Math.round(height * 0.85));
+        canvas.width = width;
+        canvas.height = height;
+        ctx = canvas.getContext('2d', { alpha: true });
+        ctx.drawImage(bitmap, 0, 0, width, height);
+      }
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, PREFERRED_MIME, quality));
+    }
+
+    if (!blob) {
+      throw new Error('Image compression failed.');
+    }
+    if (blob.size > ceilBytes) {
+      throw new Error('Compressed image exceeds 5MB limit.');
+    }
+    return blob;
+  }
+
+  function getStorageRef(path) {
+    if (typeof firebase === 'undefined' || !firebase.storage) {
+      throw new Error('Firebase Storage is not ready.');
+    }
+    return firebase.storage().ref(path);
+  }
+
+  function addItemRow(name, sizeText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'upload-item';
+    wrap.innerHTML = `
+      <div class="upload-item__row">
+        <div class="upload-name" title="${name}">${name}</div>
+        <div class="upload-size">${sizeText}</div>
+      </div>
+      <div class="upload-bar"><span></span></div>
+      <div class="upload-status" aria-live="polite"></div>
+    `;
+    list.appendChild(wrap);
+    return {
+      bar: wrap.querySelector('.upload-bar > span'),
+      status: wrap.querySelector('.upload-status')
+    };
+  }
+
+  async function doUpload(files) {
+    if (!isMobile) return;
     if (!files || !files.length) return;
-    await ensureAppCheckToken().catch(() => {});
-    const storage = await waitForStorage().catch(() => null);
-    if (!storage) {
-        alert('스토리지가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
-        return;
-    }
-    const arr = Array.from(files).slice(0, MAX_FILES);
 
-    list?.setAttribute('aria-busy', 'true');
+    const now = Date.now();
+    if (now - lastAttemptAt < RATE_LIMIT_MS) {
+      alert('Please wait a moment before uploading again.');
+      return;
+    }
+    lastAttemptAt = now;
+
+    const selection = Array.from(files).slice(0, MAX_FILES);
+    list.setAttribute('aria-busy', 'true');
 
     let hasSuccess = false;
 
-    for (const f of arr) {
-        const row = addItemRow(f.name, fmt(f.size));
-        try {
-            if (row.status) {
-                row.status.textContent = '업로드 중...💫';
-                row.status.className = 'upload-status upload-progress';
-            }
-
-            const start = Date.now();
-            const { file: uploadFile, mime: outputMime, ext: outputExt } = await compressImage(f);
-            if (!uploadFile) throw new Error('업로드 파일 생성 실패');
-            if (uploadFile.size >= MAX_BYTES) {
-                if (row.status) {
-                    row.status.className = 'upload-status upload-error';
-                    row.status.textContent = '업로드 실패 😩ㅠ (5MB 초과)';
-                }
-                console.warn('Guest upload skipped due to size > 5MB:', uploadFile.size);
-                continue;
-            }
-            const finalMime = (outputMime && outputMime.startsWith('image/'))
-                ? outputMime
-                : (f.type && f.type.startsWith('image/')) ? f.type : PREFERRED_MIME;
-            const finalExt = outputExt || pickExt(finalMime, uploadFile?.name) || pickExt(f.type, f.name) || 'jpg';
-
-            const now = new Date();
-            const yyyy = String(now.getFullYear());
-            const mm = String(now.getMonth() + 1).padStart(2, '0');
-            const ts = now.toISOString().replace(/[:.]/g, '-');
-            const rand = Math.random().toString(36).slice(2, 8);
-
-            const path = `${UPLOAD_PREFIX}/${yyyy}/${mm}/${ts}-${rand}.${finalExt}`; // → hagack/YYYY/MM/...
-
-            const meta = {
-                contentType: finalMime,
-                customMetadata: {
-                    originalName: f.name,
-                    originalSize: String(f.size),
-                    processedName: uploadFile?.name || '',
-                    compressedSize: String(uploadFile?.size ?? 0),
-                    compressedType: finalMime,
-                    compressedExt: finalExt,
-                    ua: navigator.userAgent,
-                    uploadedAt: new Date().toISOString()
-                }
-            };
-
-            const ref = storage.ref(path);
-            const task = ref.put(uploadFile, meta);
-
-            await new Promise((resolve, reject) => {
-                task.on('state_changed', (snap) => {
-                    const pct = snap.totalBytes ? (snap.bytesTransferred / snap.totalBytes) * 100 : 0;
-                    if (row.bar) row.bar.style.width = pct.toFixed(1) + '%';
-                }, reject, resolve);
-            });
-
-            if (row.bar) row.bar.style.width = '100%';
-            if (row.status) {
-                row.status.className = 'upload-status upload-done';
-                row.status.textContent = '업로드 성공 ☑️(❁´◡`❁)';
-            }
-            hasSuccess = true;
-        } catch (err) {
-            console.error(err);
-            if (row.status) {
-                row.status.className = 'upload-status upload-error';
-                row.status.textContent = '업로드 실패 😩ㅠ';
-            }
+    for (const file of selection) {
+      const row = addItemRow(file.name, fmt(file.size));
+      try {
+        if (file.size > ceilBytes) {
+          row.status.className = 'upload-status upload-error';
+          row.status.textContent = '업로드 실패 😩ㅠ (5MB 이하로 줄여주세요)';
+          continue;
         }
+
+        if (row.status) {
+          row.status.textContent = '업로드 중...💫';
+          row.status.className = 'upload-status upload-progress';
+        }
+
+        const compressed = await compressImage(file);
+
+        const nowDate = new Date();
+        const yyyy = String(nowDate.getFullYear());
+        const mm = String(nowDate.getMonth() + 1).padStart(2, '0');
+        const ts = nowDate.toISOString().replace(/[:.]/g, '-');
+        const rand = Math.random().toString(36).slice(2, 8);
+
+        const ext = (PREFERRED_MIME === 'image/webp') ? 'webp' : 'jpg';
+        const path = `${UPLOAD_PREFIX}/${yyyy}/${mm}/${ts}-${rand}.${ext}`;
+
+        const meta = {
+          contentType: PREFERRED_MIME,
+          customMetadata: {
+            originalName: file.name,
+            originalSize: String(file.size),
+            compressedSize: String(compressed.size),
+            ua: navigator.userAgent,
+            uploadedAt: new Date().toISOString()
+          }
+        };
+
+        const task = getStorageRef(path).put(compressed, meta);
+
+        await new Promise((resolve, reject) => {
+          task.on('state_changed', (snap) => {
+            const pct = snap.totalBytes ? (snap.bytesTransferred / snap.totalBytes) * 100 : 0;
+            const bar = row.bar;
+            if (bar) bar.style.width = pct.toFixed(1) + '%';
+          }, reject, resolve);
+        });
+
+        if (row.bar) row.bar.style.width = '100%';
+        if (row.status) {
+          row.status.className = 'upload-status upload-done';
+          row.status.textContent = '업로드 성공 ☑️(❁´◡`❁)';
+        }
+        hasSuccess = true;
+      } catch (err) {
+        console.error(err);
+        if (row.status) {
+          row.status.className = 'upload-status upload-error';
+          row.status.textContent = '업로드 실패 😩ㅠ';
+        }
+      }
     }
 
-    list?.setAttribute('aria-busy', 'false');
+    list.setAttribute('aria-busy', 'false');
 
     if (hasSuccess) {
-        await refreshMemoriesSection();
+      try {
+        await window.loadMemorizedMemories?.();
+      } catch (err) {
+        console.error('Memorized Memories refresh failed:', err);
+      }
     }
-}
+  }
 
-// 버튼 클릭 → 모바일 안내 후 파일 선택
-btn?.addEventListener('click', () => {
+  btn.addEventListener('click', () => {
     if (!isMobile) {
-        alert('모바일 환경에서만 업로드를 지원합니다.');
-        return;
+      alert('Uploads are available on mobile devices only.');
+      return;
     }
-    input?.click();
-});
+    input.click();
+  });
 
-// 파일 선택 시 즉시 업로드
-input?.addEventListener('change', (e) => {
+  input.addEventListener('change', (event) => {
     if (!isMobile) return;
-    const files = e.target?.files;
+    const files = (event.target && event.target.files) || null;
     if (!files || !files.length) return;
     doUpload(files);
-    // iOS에서 동일 파일 재첨부 가능하도록 초기화
-    e.target.value = '';
-});
+    event.target.value = '';
+  });
 })();
 
 /* ==== Memorized Memories: hagack/ 목록 → 가로 스크롤 & 오버레이 ==== */
@@ -1490,13 +1432,15 @@ input?.addEventListener('change', (e) => {
 
   // 외부에서 초기화 타이밍 맞춰 부르기 위함
   window.loadMemorizedMemories = async function(){
+    const rail = document.getElementById('mmRail');
+    if (!rail) return;
+    rail.setAttribute('aria-busy', 'true');
+    rail.dataset.loading = '1';
     try {
       if (typeof firebase === 'undefined') return;
       await waitForStorage().catch(() => null);
       const storage = firebaseStorageInstance || firebase.storage?.();
       if (!storage) return;
-      const rail = document.getElementById('mmRail');
-      if (!rail) return;
       files = [];
       const root = storage.ref(UPLOAD_PREFIX);
 
@@ -1530,10 +1474,28 @@ input?.addEventListener('change', (e) => {
       });
     } catch (e) {
       console.error('Memorized Memories load failed:', e);
-      const rail = document.getElementById('mmRail');
-      if (rail) rail.innerHTML = `<div style="opacity:.8;color:#C2EAFF">사진 목록을 불러오지 못했습니다.</div>`;
+      rail.innerHTML = `<div style="opacity:.8;color:#C2EAFF">사진 목록을 불러오지 못했습니다.</div>`;
+    } finally {
+      rail.removeAttribute('aria-busy');
+      delete rail.dataset.loading;
     }
   };
+  const refreshBtn = document.getElementById('mmRefreshBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      if (refreshBtn.disabled) return;
+      refreshBtn.disabled = true;
+      refreshBtn.setAttribute('aria-busy', 'true');
+      try {
+        await window.loadMemorizedMemories?.();
+      } catch (err) {
+        console.error('Memorized Memories manual refresh failed:', err);
+      } finally {
+        refreshBtn.removeAttribute('aria-busy');
+        refreshBtn.disabled = false;
+      }
+    });
+  }
 
   // 오버레이 컨트롤
   const overlay = document.getElementById('mmOverlay');
